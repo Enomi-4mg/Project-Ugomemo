@@ -18,6 +18,7 @@
 - Tool Settings はアクティブなツールに必要な設定だけを表示
 - Tool Settings はツールごとに保持し、Pen / Tone / Eraser / Shape を切り替えても前回値を復元
 - Tone は Pen Mode と Bucket Fill Mode を別設定で操作
+- Tone の Tool Settings は Tone Mode、Pattern、Scale、Density を分けて表示し、Tone Pen と Tone Bucket を切り替え可能
 - Tool preview canvas はアクティブツールの設定変更をリアルタイム反映
 - Shape は Line / Ellipse / Triangle / Rectangle、非Line図形のFill、Option/Shift修飾キーに対応
 - Undo / Redo 最大20ステップ
@@ -26,13 +27,14 @@
 - `Left` / `Right`: ページ移動
 - `Space`: Play / Stop切り替え
 - `Option + Space` / `Alt + Space`: 選択中フレームから再生開始
-- `Cmd/Ctrl + C` / `Cmd/Ctrl + V`: フレームまたはAudio Modeクリップのコピー/ペースト
+- クロスプラットフォームショートカット対応: macOS は Command、Windows / Linux は Ctrl を主修飾キーとして使用
+- `Command + C` / `Command + V` (macOS) または `Ctrl + C` / `Ctrl + V` (Windows / Linux): フレームまたはAudio Modeクリップのコピー/ペースト
 - `Delete` / `Backspace`: Edit Modeの選択フレーム、またはAudio Modeの選択クリップを削除
 - `T`: Tone、`E`: Eraser、`P`: Pen、`S`: Shape
 - 最終ページで`Right`: 1回目は作成確認、2回目で新規ページ作成
 - 先頭ページで`Left`: 1回目は先頭作成確認、2回目で新規ページを先頭に追加
 - Edit Mode: ページ列、Clear / Copy / Paste / Duplicate / Insert New / Delete
-- Cmd/Meta 押下中だけ、前後ページの同じレイヤーを薄く表示するオニオンスキン
+- プラットフォームごとの主修飾キー押下中だけ、前後ページの同じレイヤーを薄く表示するオニオンスキン
 - Playback Mode: プレビューキャンバス、ページ列、再生/停止、速度選択
 - Project Config: root `fps`を`.upj`に保存し、Playback / Audio / Exportの標準同期クロックとして使用
 - Playback Mode: 再生中/スクラブ中に現在ページが下部ページ列内へ自動スクロール
@@ -116,7 +118,7 @@ Shape の Option / Alt 修飾は描画中の押下状態を即時反映します
 
 Tone は Bucket Fill Mode で `getImageData()` ピクセルに対する独自Flood Fillを行い、アンチエイリアス境界の白抜けを抑えるために塗り領域を1-2px拡張します。その後、dot / line / noise のトーンパターンを `createPattern()` で繰り返し適用し、既存線画の背面へ `destination-over` で合成します。Pen Mode では同じ生成パターンをストローク塗料として使います。
 
-Tone は dot / line / noise の3系統と Fine / Normal / Coarse の3段階を組み合わせた9種類のパターンを選択できます。
+Tone は Tone Mode で Pen / Bucket を切り替え、Pattern で dot / line / noise、Scale で Fine / Normal / Coarse、Density で濃度を調整します。内部的には従来どおり `dot-small`、`dot-medium`、`dot-large`、`line-small`、`line-medium`、`line-large`、`noise-small`、`noise-medium`、`noise-large` の `tonePattern` 値を使うため、保存済みプロジェクトとの互換性を維持します。
 
 ## プロジェクトファイル
 
@@ -153,7 +155,7 @@ Audio Mode persistence fields:
 - Playback Modeは大きなプレビューキャンバス、下部ページ列、Play / Pause / FPS Selectorを持つ。
 - Audio Modeは小型プレビュー、素材列、Workstation/Mixerタブ、Record modal、4トラックタイムライン、Play/Pause/Stop/FPSを持つ。
 - 全プレビューキャンバスは4:3比率を維持する。
-- Cmd/Meta押下中のみオニオンスキンを表示する。
+- macOS は Command、Windows / Linux は Ctrl 押下中のみオニオンスキンを表示する。
 - ExportはImage Export / Video Exportのタブ、preview window、advanced overridesを持つ。
 - Export設定ダイアログ表示中は背景UIを操作できない。
 - Image ExportはAll Frames / Select Partial Framesを切り替える。

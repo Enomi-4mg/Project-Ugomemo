@@ -1,26 +1,12 @@
 import { getFitCamera } from "./renderer";
 import { cloneImageData } from "./project";
 import type { Camera, DrawingProject, Layer, PaletteColor, Tool } from "./types";
+import { parseTonePattern, type TonePattern } from "../ui/tone/tonePattern";
 
 export type DrawingToolId = Tool;
 export type PenShape = "round" | "square";
 export type ShapeType = "line" | "ellipse" | "triangle" | "rectangle";
 export type ToneMode = "pen" | "bucket";
-export type TonePatternBase = "dot" | "line" | "noise";
-export type TonePatternSize = "small" | "medium" | "large";
-export type TonePattern = `${TonePatternBase}-${TonePatternSize}`;
-
-export const tonePatternOptions: Array<{ value: TonePattern; label: string }> = [
-  { value: "dot-small", label: "Dot - Small" },
-  { value: "dot-medium", label: "Dot - Medium" },
-  { value: "dot-large", label: "Dot - Large" },
-  { value: "line-small", label: "Line - Small" },
-  { value: "line-medium", label: "Line - Medium" },
-  { value: "line-large", label: "Line - Large" },
-  { value: "noise-small", label: "Noise - Small" },
-  { value: "noise-medium", label: "Noise - Medium" },
-  { value: "noise-large", label: "Noise - Large" },
-];
 
 export type ToolSettings = {
   color: PaletteColor["rgba"];
@@ -573,7 +559,7 @@ function createTonePattern(
   context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   settings: ToolSettings,
 ): CanvasPattern | null {
-  const { base, patternSize } = parseTonePattern(settings.tonePattern);
+  const { base, size: patternSize } = parseTonePattern(settings.tonePattern);
   const density = getToneDensityFactor(settings.toneDensity);
   const cellSize = patternSize === "large" ? 72 : patternSize === "medium" ? 48 : 28;
   const patternCanvas = createPatternCanvas(cellSize, cellSize);
@@ -626,11 +612,6 @@ function createTonePattern(
   }
 
   return context.createPattern(patternCanvas as unknown as CanvasImageSource, "repeat");
-}
-
-function parseTonePattern(pattern: TonePattern): { base: TonePatternBase; patternSize: TonePatternSize } {
-  const [base, patternSize] = pattern.split("-") as [TonePatternBase, TonePatternSize];
-  return { base, patternSize };
 }
 
 function getToneDensityFactor(density: number): number {
