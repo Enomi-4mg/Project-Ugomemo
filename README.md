@@ -14,7 +14,7 @@
 - 背景色は右側レイヤーUIから6色で選択
 - ペン、トーン、消しゴム、シェイプ
 - 描画ツールは Strategy Pattern と共通 `DrawingTool` インターフェースで実装
-- UIアクションは `lucide-react` のSVGアイコンを中心に表示し、Draw ToolやExportなど識別性が必要な場所はアイコンと名前を併記する。各アイコンにはhover用の `title` と `aria-label` を付ける
+- UIアクションは `lucide-react` のSVGアイコンを中心に表示し、Draw ToolやExportなど識別性が必要な場所はアイコンと名前を併記する。主要ボタンにはhover用の `title` と `aria-label` で操作名とショートカットを表示する
 - Tool Settings はアクティブなツールに必要な設定だけを表示
 - Tool Settings はツールごとに保持し、Pen / Tone / Eraser / Shape を切り替えても前回値を復元
 - Tone は Pen Mode と Bucket Fill Mode を別設定で操作
@@ -28,14 +28,18 @@
 - `Space`: Play / Stop切り替え
 - `Option + Space` / `Alt + Space`: 選択中フレームから再生開始
 - クロスプラットフォームショートカット対応: macOS は Command、Windows / Linux は Ctrl を主修飾キーとして使用
+- `Command + S` / `Command + Shift + S` (macOS) または `Ctrl + S` / `Ctrl + Shift + S` (Windows / Linux): Save / Save As
 - `Command + C` / `Command + V` (macOS) または `Ctrl + C` / `Ctrl + V` (Windows / Linux): フレームまたはAudio Modeクリップのコピー/ペースト
+- `Control + 1` / `Control + 2` / `Control + 3` / `Control + 4`: Draw / Edit / Playback / Audio Mode切り替え
 - `Delete` / `Backspace`: Edit Modeの選択フレーム、またはAudio Modeの選択クリップを削除
-- `T`: Tone、`E`: Eraser、`P`: Pen、`S`: Shape
+- Draw Mode中の `Q`: Pen、`W`: Tone、`E`: Eraser、`R`: Shape
+- `]`: Brush sizeを小さくする、`[`: Brush sizeを大きくする
 - 最終ページで`Right`: 1回目は作成確認、2回目で新規ページ作成
 - 先頭ページで`Left`: 1回目は先頭作成確認、2回目で新規ページを先頭に追加
 - Edit Mode: ページ列、Clear / Copy / Paste / Duplicate / Insert New / Delete
 - プラットフォームごとの主修飾キー押下中だけ、前後ページの同じレイヤーを薄く表示するオニオンスキン
 - Playback Mode: プレビューキャンバス、ページ列、再生/停止、速度選択
+- Project preview: Draw / Playback / Audio Modeのキャンバス表示は`project.width / project.height`を基準にcontain-styleで最大フィットし、内部解像度を変えずに縦横比を維持する
 - Project Config: root `fps`を`.upj`に保存し、Playback / Audio / Exportの標準同期クロックとして使用
 - Playback Mode: 再生中/スクラブ中に現在ページが下部ページ列内へ自動スクロール
 - Edit Mode: 実フレームのサムネイル付きページ列と、キーボード移動時の自動スクロール
@@ -52,7 +56,8 @@
 - Audio Mode: 外部音声素材は`audioAssets`辞書で管理し、missing/offline素材は赤表示
 - Audio Mode: Bundleで参照音声をプロジェクト横の`assets/`へコピーし、相対パス化してポータブル保存
 - Audio Mode: 実素材尺に基づくドロップ位置プレビュー、project frame範囲を越える柔軟なtrim/loop編集
-- Audio Mode: プレビューキャンバスは縦方向にフィットしつつ4:3比率を維持
+- Audio Mode: Snapは編集補助であり、off-snapの音声クリップ位置も保存可能
+- Audio Mode: フレームプレビューはDraw Modeと同じcontain-styleフィットを使い、プロジェクト解像度由来の縦横比を維持
 - Audio Timeline: クリップの削除、複製、コピー/ペースト、分割、反転、ループ/トリム操作
 - Audio Engine: Web Audio APIでタイムラインクリップをフレーム再生と同期し、track Gain / clip Gain / StereoPannerを構成
 - Audio Mixer: Mixer tabのMute / Solo / Volumeは同じ`audioTracks` stateを更新し、リアルタイム再生と書き出しへ反映
@@ -165,7 +170,7 @@ Audio Mode persistence fields:
 - Audio Only (WAV)はタイムラインのOfflineAudioContextミックスだけを書き出す。
 - Target FPS、Image Resolution、Audio Sample RateはExportごとに上書きできる。
 - Sprite SheetはPNGとして出力する。
-- Saveは現在の`.upj`へ直接上書きし、Save AsはOSネイティブダイアログを開く。
+- Saveは現在の`.upj`へ直接上書きし、Save AsはOSネイティブダイアログを開く。macOSはCommand + S / Command + Shift + S、Windows / LinuxはCtrl + S / Ctrl + Shift + Sで実行できる。
 - LoadはOSネイティブダイアログから`.upj`を選択し、全ページ、全PNGレイヤー、Audio Mode状態を復元する。
 - Load / Save / Export中はアプリ全体への入力をブロックする。
 - OSウィンドウタイトルは`Project Ugomemo - [filename].upj`、未保存時は末尾に`*`を付ける。

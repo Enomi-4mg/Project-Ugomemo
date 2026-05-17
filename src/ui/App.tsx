@@ -89,8 +89,9 @@ import {
   type ProjectPackagePaths,
 } from "../tauri/projectCommands";
 import { IconButton } from "./components/IconButton";
-import { IMAGE_EXPORT_FORMATS, PLAYBACK_SPEEDS, VIDEO_EXPORT_FORMATS, VIEWPORT_HEIGHT, VIEWPORT_WIDTH, Z_DEPTHS } from "./constants";
-import { detectPlatform, getShortcutLabel, isPrimaryModifier, isPrimaryModifierKey } from "./keyboard/shortcuts";
+import { ProjectPreviewFrame } from "./components/ProjectPreviewFrame";
+import { BRUSH_SIZE_MAX, BRUSH_SIZE_MIN, IMAGE_EXPORT_FORMATS, PLAYBACK_SPEEDS, VIDEO_EXPORT_FORMATS, VIEWPORT_HEIGHT, VIEWPORT_WIDTH, Z_DEPTHS } from "./constants";
+import { detectPlatform, getShortcutLabel, isPrimaryModifierKey, isShortcutAction, shouldIgnoreShortcutEvent, type Platform } from "./keyboard/shortcuts";
 import { buildTonePattern, parseTonePattern, TONE_PATTERN_BASES, TONE_PATTERN_SIZES, type TonePatternBase, type TonePatternSize } from "./tone/tonePattern";
 import type {
   AppMode,
@@ -316,6 +317,17 @@ export function App() {
         [tool]: nextToolSettings,
       };
     });
+  }
+
+  function adjustBrushSize(delta: number) {
+    if (tool === "tone" && toolSettings.toneMode === "bucket") {
+      return;
+    }
+
+    setToolSettings((current) => ({
+      ...current,
+      size: clampBrushSize(current.size + delta),
+    }));
   }
 
   function getEffectiveToolSettings(event: { altKey: boolean; shiftKey: boolean }): ToolSettings {
@@ -710,12 +722,9 @@ export function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (fileOperation.active || isTypingTarget(event.target)) {
+      if (fileOperation.active || shouldIgnoreShortcutEvent(event)) {
         return;
       }
-
-      const key = event.key.toLowerCase();
-      const hasPrimaryModifier = isPrimaryModifier(event, platform);
 
       if (isPrimaryModifierKey(event, platform)) {
         if (pageCreatePromptVisible) {
@@ -725,27 +734,62 @@ export function App() {
         return;
       }
 
-      const isUndo = hasPrimaryModifier && key === "z" && !event.shiftKey;
-      const isRedo = hasPrimaryModifier && key === "z" && event.shiftKey;
+      if (isShortcutAction(event, "saveAs", platform)) {
+        event.preventDefault();
+        cancelPagePrompt();
+        void handleSaveAsProject("manual");
+        return;
+      }
 
-      if (isUndo) {
+      if (isShortcutAction(event, "save", platform)) {
+        event.preventDefault();
+        cancelPagePrompt();
+        void handleSaveClick("manual");
+        return;
+      }
+
+      if (isShortcutAction(event, "undo", platform)) {
         event.preventDefault();
         cancelPagePrompt();
         applyUndo();
         return;
       }
 
-      if (isRedo) {
+      if (isShortcutAction(event, "redo", platform)) {
         event.preventDefault();
         cancelPagePrompt();
         applyRedo();
         return;
       }
 
-      if (event.code === "Space") {
+      if (isShortcutAction(event, "switchToDrawMode", platform)) {
+        event.preventDefault();
+        setModeAndCancel("draw");
+        return;
+      }
+
+      if (isShortcutAction(event, "switchToEditMode", platform)) {
+        event.preventDefault();
+        setModeAndCancel("edit");
+        return;
+      }
+
+      if (isShortcutAction(event, "switchToPlaybackMode", platform)) {
+        event.preventDefault();
+        setModeAndCancel("playback");
+        return;
+      }
+
+      if (isShortcutAction(event, "switchToAudioMode", platform)) {
+        event.preventDefault();
+        setModeAndCancel("audio");
+        return;
+      }
+
+      if (isShortcutAction(event, "playPause", platform) || isShortcutAction(event, "playFromCurrent", platform)) {
         event.preventDefault();
         cancelPagePrompt();
-        const playFromCurrentFrame = event.altKey;
+        const playFromCurrentFrame = isShortcutAction(event, "playFromCurrent", platform);
         if (playFromCurrentFrame) {
           setPlaybackIndex(mode === "draw" || mode === "edit" ? project.currentPageIndex : playbackIndex);
           setStopArmedForReset(false);
@@ -761,90 +805,105 @@ export function App() {
       }
 
       if (mode === "audio") {
-        if (event.key === "Delete" || event.key === "Backspace") {
+        if (isShortcutAction(event, "delete", platform)) {
           event.preventDefault();
           deleteSelectedClip();
           return;
         }
 
-        if (hasPrimaryModifier && key === "c") {
+        if (isShortcutAction(event, "copy", platform)) {
           event.preventDefault();
           copySelectedClip();
           return;
         }
 
-        if (hasPrimaryModifier && key === "v") {
+        if (isShortcutAction(event, "paste", platform)) {
           event.preventDefault();
           pasteClipAtPlayhead();
           return;
         }
       } else {
-        if (hasPrimaryModifier && key === "c") {
+        if (isShortcutAction(event, "copy", platform)) {
           event.preventDefault();
           copyCurrentFrame();
           return;
         }
 
-        if (hasPrimaryModifier && key === "v") {
+        if (isShortcutAction(event, "paste", platform)) {
           event.preventDefault();
           pasteFrame();
           return;
         }
 
-        if ((event.key === "Delete" || event.key === "Backspace") && mode === "edit") {
+        if (isShortcutAction(event, "delete", platform) && mode === "edit") {
           event.preventDefault();
           deleteCurrentFrame();
           return;
         }
       }
 
-      if (!hasPrimaryModifier && !event.altKey) {
-        if (key === "t") {
-          event.preventDefault();
-          cancelPagePrompt();
-          setTool("tone");
-          setMode((current) => (current === "draw" ? current : "draw"));
-          return;
-        }
-
-        if (key === "e") {
-          event.preventDefault();
-          cancelPagePrompt();
-          setTool("eraser");
-          setMode((current) => (current === "draw" ? current : "draw"));
-          return;
-        }
-
-        if (key === "p") {
+      if (mode === "draw") {
+        if (isShortcutAction(event, "selectPen", platform)) {
           event.preventDefault();
           cancelPagePrompt();
           setTool("pen");
-          setMode((current) => (current === "draw" ? current : "draw"));
           return;
         }
 
-        if (key === "s") {
+        if (isShortcutAction(event, "selectTone", platform)) {
+          event.preventDefault();
+          cancelPagePrompt();
+          setTool("tone");
+          return;
+        }
+
+        if (isShortcutAction(event, "selectEraser", platform)) {
+          event.preventDefault();
+          cancelPagePrompt();
+          setTool("eraser");
+          return;
+        }
+
+        if (isShortcutAction(event, "selectShape", platform)) {
           event.preventDefault();
           cancelPagePrompt();
           setTool("shape");
-          setMode((current) => (current === "draw" ? current : "draw"));
           return;
         }
       }
 
-      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+      if (isShortcutAction(event, "decreaseBrushSize", platform)) {
+        event.preventDefault();
+        cancelPagePrompt();
+        adjustBrushSize(-1);
+        return;
+      }
+
+      if (isShortcutAction(event, "increaseBrushSize", platform)) {
+        event.preventDefault();
+        cancelPagePrompt();
+        adjustBrushSize(1);
+        return;
+      }
+
+      if (
+        isShortcutAction(event, "previousLayer", platform) ||
+        isShortcutAction(event, "nextLayer", platform) ||
+        isShortcutAction(event, "previousPage", platform) ||
+        isShortcutAction(event, "nextPage", platform)
+      ) {
         event.preventDefault();
       }
 
-      if (event.key === "ArrowUp") {
+      if (isShortcutAction(event, "previousLayer", platform)) {
         cancelPagePrompt();
         navigateLayer(-1);
-      } else if (event.key === "ArrowDown") {
+      } else if (isShortcutAction(event, "nextLayer", platform)) {
         cancelPagePrompt();
         navigateLayer(1);
-      } else if (event.key === "ArrowLeft") {
+      } else if (isShortcutAction(event, "previousPage", platform)) {
         handleLeftArrow();
-      } else if (event.key === "ArrowRight") {
+      } else if (isShortcutAction(event, "nextPage", platform)) {
         handleRightArrow();
       } else {
         cancelPagePrompt();
@@ -863,7 +922,7 @@ export function App() {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [fileOperation.active, history, isPlaying, mode, pageCreatePromptVisible, platform, playbackIndex, project, rapidPageCreationDirection, selectedClipId, timelineClips, clipClipboard, copiedFrame]);
+  }, [fileOperation.active, history, isPlaying, mode, pageCreatePromptVisible, platform, playbackIndex, project, rapidPageCreationDirection, selectedClipId, timelineClips, clipClipboard, copiedFrame, tool, toolSettings.toneMode]);
 
   function commit(nextProject: DrawingProject) {
     setProject(nextProject);
@@ -2665,6 +2724,8 @@ export function App() {
                 icon={drawingToolIcons[candidate]}
                 key={candidate}
                 label={drawingToolRegistry[candidate].label}
+                pressed={tool === candidate}
+                shortcut={getToolShortcut(candidate, platform)}
                 showLabel
                 onClick={() => {
                   cancelPagePrompt();
@@ -2776,18 +2837,19 @@ export function App() {
             Stroke Weight
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <input
-                min="1"
-                max="64"
+                min={BRUSH_SIZE_MIN}
+                max={BRUSH_SIZE_MAX}
                 type="range"
                 value={toolSettings.size}
-                onChange={(event) => setToolSettings((current) => ({ ...current, size: Math.max(1, Math.floor(Number(event.target.value) || 1)) }))}
+                onChange={(event) => setToolSettings((current) => ({ ...current, size: clampBrushSize(Number(event.target.value)) }))}
               />
               <input
                 type="number"
-                min={1}
+                min={BRUSH_SIZE_MIN}
+                max={BRUSH_SIZE_MAX}
                 step={1}
                 value={toolSettings.size}
-                onChange={(event) => setToolSettings((current) => ({ ...current, size: Math.max(1, Math.floor(Number(event.target.value) || 1)) }))}
+                onChange={(event) => setToolSettings((current) => ({ ...current, size: clampBrushSize(Number(event.target.value)) }))}
                 style={{ width: 64 }}
               />
             </div>
@@ -3053,8 +3115,6 @@ export function App() {
   }
 
   function renderStage() {
-    const projectAspectRatio = `${project.width} / ${project.height}`;
-
     if (mode === "edit") {
       return (
         <section className="stage-card edit-stage" ref={stageRef}>
@@ -3062,8 +3122,8 @@ export function App() {
             {renderFrameRail("frame-rail edit-frame-rail")}
             <div className="edit-actions">
               <IconButton icon={BrushCleaning} label="Clear frame" showLabel onClick={clearCurrentFrame} />
-              <IconButton icon={Copy} label={`Copy frame (${getShortcutLabel("copy", platform)})`} showLabel onClick={copyCurrentFrame} />
-              <IconButton icon={FilePenLine} label={`Paste frame (${getShortcutLabel("paste", platform)})`} showLabel onClick={pasteFrame} />
+              <IconButton icon={Copy} label="Copy frame" shortcut={getShortcutLabel("copy", platform)} showLabel onClick={copyCurrentFrame} />
+              <IconButton icon={FilePenLine} label="Paste frame" shortcut={getShortcutLabel("paste", platform)} showLabel onClick={pasteFrame} />
               <IconButton icon={CopyPlus} label="Duplicate frame" showLabel onClick={duplicateFrame} />
               <IconButton icon={SquarePen} label="Insert new frame" showLabel onClick={insertNewFrame} />
               <IconButton icon={Trash2} label="Delete frame" showLabel onClick={deleteCurrentFrame} />
@@ -3076,16 +3136,14 @@ export function App() {
     if (mode === "playback") {
       return (
         <section className="stage-card playback-stage" ref={stageRef}>
-          <div className="playback-preview-frame">
-            <div className="canvas-aspect-frame" style={{ aspectRatio: projectAspectRatio }}>
-              <canvas
-                className="drawing-canvas playback-canvas"
-                height={project.height}
-                ref={canvasRef}
-                width={project.width}
-              />
-            </div>
-          </div>
+          <ProjectPreviewFrame className="playback-preview-frame" projectHeight={project.height} projectWidth={project.width}>
+            <canvas
+              className="drawing-canvas playback-canvas"
+              height={project.height}
+              ref={canvasRef}
+              width={project.width}
+            />
+          </ProjectPreviewFrame>
           {renderFrameRail("frame-rail playback-rail")}
           {renderPlaybackControls()}
         </section>
@@ -3135,16 +3193,14 @@ export function App() {
             <div className="audio-center-column">
               <section className="audio-preview-panel">
                 <h2>Frame Preview</h2>
-                <div className="audio-preview-frame">
-                  <div className="canvas-aspect-frame compact-preview" style={{ aspectRatio: projectAspectRatio }}>
-                    <canvas
-                      className="drawing-canvas audio-preview-canvas"
-                      height={project.height}
-                      ref={canvasRef}
-                      width={project.width}
-                    />
-                  </div>
-                </div>
+                <ProjectPreviewFrame className="audio-preview-frame" projectHeight={project.height} projectWidth={project.width}>
+                  <canvas
+                    className="drawing-canvas audio-preview-canvas"
+                    height={project.height}
+                    ref={canvasRef}
+                    width={project.width}
+                  />
+                </ProjectPreviewFrame>
               </section>
               <section className="audio-column audio-workstation">
                 <div className="timeline-header">
@@ -3236,20 +3292,18 @@ export function App() {
 
     return (
       <section className="stage-card" ref={stageRef}>
-        <div className="draw-canvas-frame">
-          <div className="canvas-aspect-frame" style={{ aspectRatio: projectAspectRatio }}>
-            <canvas
-              className="drawing-canvas"
-              height={project.height}
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-              onPointerCancel={handlePointerUp}
-              ref={canvasRef}
-              width={project.width}
-            />
-          </div>
-        </div>
+        <ProjectPreviewFrame className="draw-canvas-frame" projectHeight={project.height} projectWidth={project.width}>
+          <canvas
+            className="drawing-canvas"
+            height={project.height}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+            ref={canvasRef}
+            width={project.width}
+          />
+        </ProjectPreviewFrame>
       </section>
     );
   }
@@ -3614,10 +3668,10 @@ export function App() {
     <main className={`app-shell ${mode}-mode`}>
       <header className="top-toolbar">
         <div className="mode-actions" aria-label="Mode selection">
-          <IconButton className={mode === "draw" ? "active" : ""} icon={Pencil} label="Draw mode" onClick={() => setModeAndCancel("draw")} />
-          <IconButton className={mode === "edit" ? "active" : ""} icon={SquarePen} label="Edit mode" onClick={() => setModeAndCancel("edit")} />
-          <IconButton className={mode === "playback" ? "active" : ""} icon={Play} label="Playback mode" onClick={() => setModeAndCancel("playback")} />
-          <IconButton className={mode === "audio" ? "active" : ""} icon={Volume2} label="Audio mode" onClick={() => setModeAndCancel("audio")} />
+          <IconButton className={mode === "draw" ? "active" : ""} icon={Pencil} label="Draw mode" pressed={mode === "draw"} shortcut={getShortcutLabel("switchToDrawMode", platform)} onClick={() => setModeAndCancel("draw")} />
+          <IconButton className={mode === "edit" ? "active" : ""} icon={SquarePen} label="Edit mode" pressed={mode === "edit"} shortcut={getShortcutLabel("switchToEditMode", platform)} onClick={() => setModeAndCancel("edit")} />
+          <IconButton className={mode === "playback" ? "active" : ""} icon={Play} label="Playback mode" pressed={mode === "playback"} shortcut={getShortcutLabel("switchToPlaybackMode", platform)} onClick={() => setModeAndCancel("playback")} />
+          <IconButton className={mode === "audio" ? "active" : ""} icon={Volume2} label="Audio mode" pressed={mode === "audio"} shortcut={getShortcutLabel("switchToAudioMode", platform)} onClick={() => setModeAndCancel("audio")} />
         </div>
         <p className="global-status-readout" aria-live="polite">{status}</p>
         <div className="toolbar-actions" aria-label="File operations">
@@ -3625,12 +3679,12 @@ export function App() {
             {pageIndicator}
           </span>
           <IconButton icon={FilePlus2} label="New project" onClick={handleNewProject} />
-          <IconButton icon={Save} label={hasUnsavedChanges ? "Save unsaved project" : "Save project"} onClick={() => void handleSaveClick("manual")} />
+          <IconButton icon={Save} label={hasUnsavedChanges ? "Save unsaved project" : "Save project"} shortcut={getShortcutLabel("save", platform)} onClick={() => void handleSaveClick("manual")} />
           <IconButton icon={FolderOpen} label="Load project" onClick={() => void handleLoadProject()} />
-          <IconButton icon={SaveAll} label="Save project as" onClick={() => void handleSaveAsProject("manual")} />
+          <IconButton icon={SaveAll} label="Save project as" shortcut={getShortcutLabel("saveAs", platform)} onClick={() => void handleSaveAsProject("manual")} />
           <IconButton icon={Download} label="Export project" onClick={() => void openExportDialog()} />
-          <IconButton icon={Undo2} label={`Undo (${getShortcutLabel("undo", platform)})`} onClick={applyUndo} />
-          <IconButton icon={Redo2} label={`Redo (${getShortcutLabel("redo", platform)})`} onClick={applyRedo} />
+          <IconButton icon={Undo2} label="Undo" shortcut={getShortcutLabel("undo", platform)} onClick={applyUndo} />
+          <IconButton icon={Redo2} label="Redo" shortcut={getShortcutLabel("redo", platform)} onClick={applyRedo} />
         </div>
       </header>
 
@@ -3646,8 +3700,8 @@ export function App() {
         >
           <IconButton icon={Trash2} label="Delete clip" onClick={deleteSelectedClip} />
           <IconButton icon={CopyPlus} label="Duplicate clip" onClick={duplicateSelectedClip} />
-          <IconButton icon={Copy} label={`Copy clip (${getShortcutLabel("copy", platform)})`} onClick={copySelectedClip} />
-          <IconButton icon={Upload} label={`Paste clip at playhead (${getShortcutLabel("paste", platform)})`} onClick={pasteClipAtPlayhead} />
+          <IconButton icon={Copy} label="Copy clip" shortcut={getShortcutLabel("copy", platform)} onClick={copySelectedClip} />
+          <IconButton icon={Upload} label="Paste clip at playhead" shortcut={getShortcutLabel("paste", platform)} onClick={pasteClipAtPlayhead} />
           <IconButton icon={Scissors} label="Split clip" onClick={splitSelectedClip} />
           <IconButton icon={RotateCcw} label="Reverse clip" onClick={reverseSelectedClip} />
         </div>
@@ -4195,6 +4249,23 @@ function snapTimelineFrame(frame: number, snapEnabled: boolean): number {
   return snapEnabled ? Math.round(safeFrame) : Math.round(safeFrame * 100) / 100;
 }
 
+function clampBrushSize(size: number): number {
+  return Math.min(BRUSH_SIZE_MAX, Math.max(BRUSH_SIZE_MIN, Math.floor(Number.isFinite(size) ? size : BRUSH_SIZE_MIN)));
+}
+
+function getToolShortcut(toolId: DrawingToolId, platform: Platform): string {
+  if (toolId === "pen") {
+    return getShortcutLabel("selectPen", platform);
+  }
+  if (toolId === "tone") {
+    return getShortcutLabel("selectTone", platform);
+  }
+  if (toolId === "eraser") {
+    return getShortcutLabel("selectEraser", platform);
+  }
+  return getShortcutLabel("selectShape", platform);
+}
+
 function getFrameFromTrackPointer(trackElement: HTMLElement, clientX: number, pixelsPerFrame: number, snapEnabled: boolean): number {
   const trackRect = trackElement.getBoundingClientRect();
   const headerWidth = trackElement.querySelector<HTMLElement>(".track-header")?.getBoundingClientRect().width ?? 132;
@@ -4204,19 +4275,6 @@ function getFrameFromTrackPointer(trackElement: HTMLElement, clientX: number, pi
 
 function formatFrameLabel(frame: number): string {
   return Number.isInteger(frame) ? `F${frame + 1}` : `F${(frame + 1).toFixed(2)}`;
-}
-
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-
-  return (
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement ||
-    target.isContentEditable
-  );
 }
 
 function getExportSampleRate(quality: ExportAudioQuality): number {

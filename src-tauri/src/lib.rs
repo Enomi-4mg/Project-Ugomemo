@@ -94,8 +94,8 @@ pub struct AudioAssetPayload {
 pub struct AudioClipPayload {
     id: String,
     asset_id: String,
-    start_frame: usize,
-    duration_frames: usize,
+    start_frame: f64,
+    duration_frames: f64,
     source_offset_ms: u64,
     volume: f32,
     playback_rate: f32,
@@ -122,10 +122,10 @@ pub struct TimelineClipPayload {
     source_type: String,
     name: String,
     track_index: usize,
-    start_frame: usize,
-    duration_frames: usize,
+    start_frame: f64,
+    duration_frames: f64,
     #[serde(default)]
-    source_offset_frames: usize,
+    source_offset_frames: f64,
     loop_count: usize,
     reversed: bool,
     #[serde(default = "default_clip_volume")]
@@ -133,9 +133,9 @@ pub struct TimelineClipPayload {
     #[serde(default)]
     panning: f32,
     #[serde(default)]
-    fade_in_frames: usize,
+    fade_in_frames: f64,
     #[serde(default)]
-    fade_out_frames: usize,
+    fade_out_frames: f64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

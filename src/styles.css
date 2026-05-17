@@ -202,14 +202,38 @@ button:not(:disabled):hover .lucide {
   max-height: 100%;
 }
 
+.project-preview-shell,
 .draw-canvas-frame,
 .playback-preview-frame,
 .audio-preview-frame {
   display: grid;
   place-items: center;
+  width: 100%;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.project-preview-frame {
+  display: grid;
+  width: 0;
+  height: 0;
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: var(--project-aspect-ratio);
+  outline: 3px solid var(--pink);
+  background: var(--white);
+}
+
+.project-preview-frame > canvas {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
 }
 
 .canvas-aspect-frame {
@@ -219,11 +243,6 @@ button:not(:disabled):hover .lucide {
   max-width: 100%;
   max-height: 100%;
   aspect-ratio: 4 / 3;
-}
-
-.compact-preview {
-  width: auto;
-  height: 100%;
 }
 
 .playback-canvas {
@@ -427,27 +446,6 @@ button:not(:disabled):hover .lucide {
 .audio-preview-frame {
   width: 100%;
   height: 100%;
-}
-
-.audio-preview-frame .canvas-aspect-frame {
-  /* Match draw mode aspect ratio but keep the audio preview compact
-     so the whole preview is visible within the panel. */
-  aspect-ratio: 4 / 3;
-  width: auto;
-  /* Prevent the preview from growing too tall and overlapping the workstation */
-  height: auto;
-  max-width: 320px;
-  max-height: 240px;
-}
-
-/* Compact variant of the aspect frame (used by audio preview and other small previews)
-   ensures the preview keeps the 4:3 ratio and fully fits its container. */
-.canvas-aspect-frame.compact-preview {
-  aspect-ratio: 4 / 3;
-  width: auto;
-  height: auto;
-  max-width: 320px;
-  max-height: 240px;
 }
 
 .audio-assets {

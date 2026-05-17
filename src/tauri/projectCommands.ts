@@ -371,10 +371,48 @@ function toProjectPayload(project: DrawingProject, audio: AudioWorkstationState)
     })),
     audioMaterials: audio.audioMaterials,
     recordings: audio.recordings,
-    timelineClips: audio.timelineClips,
+    timelineClips: audio.timelineClips.map(sanitizeTimelineClipForSave),
     audioAssets: audio.audioAssets,
-    audioTracks: audio.audioTracks,
+    audioTracks: audio.audioTracks.map(sanitizeAudioTrackForSave),
   };
+}
+
+function sanitizeTimelineClipForSave(clip: PersistedTimelineClip): PersistedTimelineClip {
+  return {
+    ...clip,
+    startFrame: finiteNumberOrZero(clip.startFrame),
+    durationFrames: finiteNumberOrZero(clip.durationFrames),
+    sourceOffsetFrames: finiteNumberOrZero(clip.sourceOffsetFrames),
+    trackIndex: finiteIntegerOrZero(clip.trackIndex),
+    loopCount: finiteIntegerOrZero(clip.loopCount),
+    volume: finiteNumberOrZero(clip.volume),
+    panning: finiteNumberOrZero(clip.panning),
+    fadeInFrames: finiteNumberOrZero(clip.fadeInFrames),
+    fadeOutFrames: finiteNumberOrZero(clip.fadeOutFrames),
+  };
+}
+
+function sanitizeAudioTrackForSave(track: PersistedAudioTrack): PersistedAudioTrack {
+  return {
+    ...track,
+    volume: finiteNumberOrZero(track.volume),
+    clips: track.clips.map((clip) => ({
+      ...clip,
+      startFrame: finiteNumberOrZero(clip.startFrame),
+      durationFrames: finiteNumberOrZero(clip.durationFrames),
+      sourceOffsetMs: finiteIntegerOrZero(clip.sourceOffsetMs),
+      volume: finiteNumberOrZero(clip.volume),
+      playbackRate: finiteNumberOrZero(clip.playbackRate),
+    })),
+  };
+}
+
+function finiteNumberOrZero(value: number): number {
+  return Number.isFinite(value) ? value : 0;
+}
+
+function finiteIntegerOrZero(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 }
 
 function emptyAudioState(): AudioWorkstationState {
