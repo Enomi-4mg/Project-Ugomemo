@@ -193,9 +193,73 @@ npm run dev
 
 ## Windows対応とCI
 
-- Windows では GitHub Actions の Release Build で `msi` / `exe` / `zip` を生成します。
-- Pull Request では macOS と Windows の両方で `npm run build` と `cargo check` を実行します。
-- ローカルの生成物として `dist/` と `src-tauri/target/` は git 管理しません。
+## リリース手順とトリガ（詳細）
+
+このリポジトリの自動ビルドは 2 種類のワークフローで動きます。
+
+- CI (検証): `pull_request` と `push`（`main` ブランチ）で発火します。
+    - 実行内容: `npm ci` → `npm run build`（フロントエンド）および `cargo check --manifest-path src-tauri/Cargo.toml`（バックエンド）を macOS/Windows 上で検証します。
+    - 目的: PR や main への変更でビルドが壊れていないかを早期に検出すること。
+
+- Release Build: `push` のうちタグ名が `v*`（例: `v1.0.0`）のときに発火します。
+    - 実行内容: CI の検証に加え、`npm run tauri:build` でプラットフォーム向けのバンドルを生成します（現在は Windows 向けのマトリクスで `src-tauri/target/release/bundle/` 以下の成果物を収集します）。
+    - 生成される成果物例: `msi`, `nsis` (`.exe`), あるいは zip など、Tauri のバンドル出力全体。
+    - ワークフローはタグ push を検出して起動するため、GitHub の Release 作成操作（UI でのリリース作成）以前にタグを push するか、`gh` コマンドや `git` でタグを作成して push してください。
+
+注意点:
+
+- ワークフローは現在、タグ名プレフィックス `v` にマッチするもののみをリリースビルドとして扱います（例: `v0.3.1`）。
+- Release ワークフローはリリースオブジェクト自体を自動で作成しません。Actions の成果物はワークフロー実行のアーティファクトとして保存されます。必要であれば、後段で `gh release create` や `actions/create-release` を追加して GitHub Release に自動で添付できます。
+- バイナリは `src-tauri/target/release/bundle/` 以下に出力されます。ワークフローはこのパスをまとめてアップロードします。
+- `ffmpeg` 等の外部ツールは local の書き出しで必要です。CI がこれらを必要とする場合は、ワークフローに `ffmpeg` のインストールステップを追加してください。
+
+ローカルでのリリース用ビルド手順（推奨）:
+
+```bash
+# 依存をインストール
+npm ci
+
+# フロントエンドのビルド（dist を生成）
+npm run build
+
+# Tauri のリリースバンドルを生成（プラットフォームのツールチェインが必要）
+npm run tauri:build
+```
+
+タグを作ってリリースビルドをトリガする方法:
+
+```bash
+# バージョンを package.json と src-tauri/Cargo.toml に反映してコミット
+git add package.json src-tauri/Cargo.toml
+git commit -m "Bump version to vX.Y.Z"
+
+# タグ作成（例）
+git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
+```
+
+または GitHub CLI を使う例:
+
+```bash
+# タグと GitHub リリースを同時に作る（ローカルでビルド済みの成果物を手動でアップロードする場合）
+gh release create v1.0.0 --title "v1.0.0" --notes "Release v1.0.0"
+```
+
+ワークフロー発火条件の要約:
+
+- PR の作成/更新 → CI が macOS/Windows で走る（検証）
+- `push` が `main` へ → CI（検証）が走る
+- `git push origin v*`（タグ push）→ Release Build ワークフローが走り、バイナリを生成してアーティファクトとしてアップロードする
+
+リリース前チェックリスト:
+
+1. `package.json` と `src-tauri/Cargo.toml` のバージョン番号を更新する
+2. 依存のインストールとローカルビルドが通ることを確認する（`npm run build` / `cargo build --release`）
+3. 必要なら `ffmpeg` 等の外部ツールが利用可能か確認する
+4. タグを作って `git push origin <tag>` する
+
+必要なら、Release ワークフローに GitHub Release の自動作成・アセット添付を追加します。ご希望なら次で自動リリース化を実装します。
+
 
 ## ドキュメント
 
