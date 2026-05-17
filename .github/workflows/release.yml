@@ -19,6 +19,10 @@ jobs:
         include:
           - os: windows-latest
             artifact_name: windows-binaries
+          - os: macos-latest
+            artifact_name: macos-binaries
+          - os: ubuntu-latest
+            artifact_name: linux-binaries
 
     steps:
       - name: Checkout
