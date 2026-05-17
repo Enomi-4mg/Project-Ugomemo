@@ -21,8 +21,6 @@ jobs:
             artifact_name: windows-binaries
           - os: macos-latest
             artifact_name: macos-binaries
-          - os: ubuntu-latest
-            artifact_name: linux-binaries
 
     steps:
       - name: Checkout
@@ -37,12 +35,6 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Ubuntu system dependencies
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libglib2.0-dev libgtk-3-dev
-
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
@@ -54,8 +46,8 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: Create binaries directory (macOS / Linux)
-        if: matrix.os != 'windows-latest'
+      - name: Create binaries directory (macOS)
+        if: matrix.os == 'macos-latest'
         run: mkdir -p src-tauri/binaries
 
       - name: Prepare bundled binaries (macOS)
@@ -64,26 +56,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p src-tauri/binaries
-          brew update
-          brew install ffmpeg
+          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
           cp "$(brew --prefix ffmpeg)/bin/ffmpeg" src-tauri/binaries/ffmpeg
           cp "$(brew --prefix ffmpeg)/bin/ffprobe" src-tauri/binaries/ffprobe
           chmod +x src-tauri/binaries/ffmpeg src-tauri/binaries/ffprobe
 
-      - name: Prepare bundled binaries (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p src-tauri/binaries
-          curl -L --fail -o /tmp/ffmpeg.tar.xz "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
-          tar -xJf /tmp/ffmpeg.tar.xz -C /tmp
-          cp /tmp/ffmpeg-*-amd64-static/ffmpeg src-tauri/binaries/ffmpeg
-          cp /tmp/ffmpeg-*-amd64-static/ffprobe src-tauri/binaries/ffprobe
-          chmod +x src-tauri/binaries/ffmpeg src-tauri/binaries/ffprobe
-
-      - name: Validate bundled binaries (macOS / Linux)
-        if: matrix.os != 'windows-latest'
+      - name: Validate bundled binaries (macOS)
+        if: matrix.os == 'macos-latest'
         shell: bash
         run: |
           set -euo pipefail
@@ -136,6 +115,28 @@ jobs:
         shell: bash
         run: |
           node -e "const fs=require('fs'); const p='src-tauri/tauri.conf.json'; const c=JSON.parse(fs.readFileSync(p,'utf8')); c.bundle.resources=['binaries/**']; fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');"
+
+      - name: Verify binaries before Tauri build (macOS)
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -la src-tauri/binaries
+          test -x src-tauri/binaries/ffmpeg
+          test -x src-tauri/binaries/ffprobe
+
+      - name: Verify binaries before Tauri build (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Get-ChildItem -Path src-tauri\binaries
+          if (-not (Test-Path src-tauri\binaries\ffmpeg.exe)) {
+            throw "src-tauri\binaries\ffmpeg.exe is missing before Tauri build."
+          }
+          if (-not (Test-Path src-tauri\binaries\ffprobe.exe)) {
+            throw "src-tauri\binaries\ffprobe.exe is missing before Tauri build."
+          }
 
       - name: Build release bundles
         run: npm run tauri:build
