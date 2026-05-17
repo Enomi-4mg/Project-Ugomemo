@@ -176,6 +176,13 @@ jobs:
       - name: Create GitHub Release and upload assets
         uses: softprops/action-gh-release@v1
         with:
-          files: src-tauri/target/release/bundle/**/*
+          files: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/msi/*.msi.sig
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe.sig
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
