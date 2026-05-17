@@ -114,7 +114,7 @@ jobs:
       - name: Configure Tauri bundled resources
         shell: bash
         run: |
-          node -e "const fs=require('fs'); const p='src-tauri/tauri.conf.json'; const c=JSON.parse(fs.readFileSync(p,'utf8')); c.bundle.resources=['binaries/**']; fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');"
+          node -e "const fs=require('fs'); const p='src-tauri/tauri.conf.json'; const resources=process.platform==='win32' ? ['binaries/ffmpeg.exe','binaries/ffprobe.exe'] : ['binaries/ffmpeg','binaries/ffprobe']; for (const resource of resources) { if (!fs.existsSync('src-tauri/' + resource)) throw new Error(resource + ' does not exist under src-tauri'); } const c=JSON.parse(fs.readFileSync(p,'utf8')); c.bundle.resources=resources; fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');"
 
       - name: Verify binaries before Tauri build (macOS)
         if: matrix.os == 'macos-latest'
@@ -137,6 +137,15 @@ jobs:
           if (-not (Test-Path src-tauri\binaries\ffprobe.exe)) {
             throw "src-tauri\binaries\ffprobe.exe is missing before Tauri build."
           }
+
+      - name: Debug Tauri build inputs
+        shell: bash
+        run: |
+          pwd
+          ls -la
+          ls -la src-tauri
+          ls -la src-tauri/binaries
+          cat src-tauri/tauri.conf.json
 
       - name: Build release bundles
         run: npm run tauri:build
