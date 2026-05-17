@@ -3,3 +3,9 @@ dist/
 src-tauri/target/
 *.log
 .DS_Store
+
+# External binaries (downloaded by CI)
+src-tauri/binaries/ffmpeg*
+src-tauri/binaries/ffprobe*
+# But include license files
+!src-tauri/binaries/*.txt
