@@ -41,7 +41,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libglib2.0-dev
+          sudo apt-get install -y pkg-config libglib2.0-dev libgtk-3-dev
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -54,46 +54,42 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: Create binaries directory (Unix)
+      - name: Create binaries directory (macOS / Linux)
         if: matrix.os != 'windows-latest'
         run: mkdir -p src-tauri/binaries
 
-      - name: Download ffmpeg (macOS / Linux)
-        if: matrix.os != 'windows-latest'
+      - name: Prepare bundled binaries (macOS)
+        if: matrix.os == 'macos-latest'
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           mkdir -p src-tauri/binaries
-          if [ "$(uname)" = "Darwin" ]; then
-            curl -L --fail -o /tmp/ffmpeg.zip "https://evermeet.cx/ffmpeg/ffmpeg-6.1.zip"
-            curl -L --fail -o /tmp/ffprobe.zip "https://evermeet.cx/ffmpeg/ffprobe-6.1.zip"
-            unzip -o /tmp/ffmpeg.zip -d /tmp/ffmpeg
-            unzip -o /tmp/ffprobe.zip -d /tmp/ffprobe
-            cp /tmp/ffmpeg/ffmpeg src-tauri/binaries/ffmpeg
-            cp /tmp/ffprobe/ffprobe src-tauri/binaries/ffprobe
-            chmod +x src-tauri/binaries/ffmpeg src-tauri/binaries/ffprobe
-          else
-            curl -L --fail -o /tmp/ff.tgz "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
-            tar -xJf /tmp/ff.tgz -C /tmp
-            cp /tmp/ffmpeg-*-amd64-static/ffmpeg src-tauri/binaries/ffmpeg
-            cp /tmp/ffmpeg-*-amd64-static/ffprobe src-tauri/binaries/ffprobe
-            chmod +x src-tauri/binaries/ffmpeg src-tauri/binaries/ffprobe
-          fi
+          brew update
+          brew install ffmpeg
+          cp "$(brew --prefix ffmpeg)/bin/ffmpeg" src-tauri/binaries/ffmpeg
+          cp "$(brew --prefix ffmpeg)/bin/ffprobe" src-tauri/binaries/ffprobe
+          chmod +x src-tauri/binaries/ffmpeg src-tauri/binaries/ffprobe
 
-      - name: Validate bundled binaries (Unix)
+      - name: Prepare bundled binaries (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src-tauri/binaries
+          curl -L --fail -o /tmp/ffmpeg.tar.xz "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+          tar -xJf /tmp/ffmpeg.tar.xz -C /tmp
+          cp /tmp/ffmpeg-*-amd64-static/ffmpeg src-tauri/binaries/ffmpeg
+          cp /tmp/ffmpeg-*-amd64-static/ffprobe src-tauri/binaries/ffprobe
+          chmod +x src-tauri/binaries/ffmpeg src-tauri/binaries/ffprobe
+
+      - name: Validate bundled binaries (macOS / Linux)
         if: matrix.os != 'windows-latest'
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           test -x src-tauri/binaries/ffmpeg
           test -x src-tauri/binaries/ffprobe
           ls -la src-tauri/binaries
-
-      - name: Enable binaries resources (Unix)
-        if: matrix.os != 'windows-latest'
-        shell: bash
-        run: |
-          node -e "const fs=require('fs'); const p='src-tauri/tauri.conf.json'; const c=JSON.parse(fs.readFileSync(p,'utf8')); c.bundle.resources=['binaries/**']; fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');"
 
       - name: Create binaries directory (Windows)
         if: matrix.os == 'windows-latest'
@@ -136,15 +132,10 @@ jobs:
             throw "src-tauri\binaries\ffprobe.exe is missing."
           }
 
-      - name: Enable binaries resources (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
+      - name: Configure Tauri bundled resources
+        shell: bash
         run: |
-          $ErrorActionPreference = "Stop"
-          $configPath = "src-tauri\tauri.conf.json"
-          $config = Get-Content $configPath -Raw | ConvertFrom-Json
-          $config.bundle.resources = @("binaries/**")
-          $config | ConvertTo-Json -Depth 100 | Set-Content $configPath
+          node -e "const fs=require('fs'); const p='src-tauri/tauri.conf.json'; const c=JSON.parse(fs.readFileSync(p,'utf8')); c.bundle.resources=['binaries/**']; fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');"
 
       - name: Build release bundles
         run: npm run tauri:build
