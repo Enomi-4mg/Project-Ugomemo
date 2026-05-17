@@ -1,0 +1,4 @@
+#!/bin/sh
+# placeholder ffmpeg binary for CI / local checks
+echo "ffmpeg placeholder"
+exit 0

@@ -44,6 +44,60 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Create binaries directory (Unix)
+        if: matrix.os != 'windows-latest'
+        run: mkdir -p src-tauri/binaries
+
+      - name: Download ffmpeg (macOS / Linux)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          set -e
+          mkdir -p src-tauri/binaries
+          if [ "$(uname)" = "Darwin" ]; then
+            curl -L -o /tmp/ffmpeg.zip "https://evermeet.cx/ffmpeg/ffmpeg-6.1.zip" || true
+            unzip -o /tmp/ffmpeg.zip -d /tmp/ffmpeg || true
+            cp /tmp/ffmpeg/ffmpeg src-tauri/binaries/ffmpeg || true
+            cp /tmp/ffmpeg/ffprobe src-tauri/binaries/ffprobe || true
+            chmod +x src-tauri/binaries/ffmpeg src-tauri/binaries/ffprobe || true
+          else
+            curl -L -o /tmp/ff.tgz "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+            tar -xJf /tmp/ff.tgz -C /tmp
+            cp /tmp/ffmpeg-*-amd64-static/ffmpeg src-tauri/binaries/ffmpeg
+            cp /tmp/ffmpeg-*-amd64-static/ffprobe src-tauri/binaries/ffprobe
+            chmod +x src-tauri/binaries/ffmpeg src-tauri/binaries/ffprobe
+          fi
+
+      - name: Enable binaries resources (Unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          set -e
+          sed -E -i.bak 's/"resources"\s*:\s*\[.*\]/"resources": ["binaries\/**"]/' src-tauri/tauri.conf.json || true
+
+      - name: Create binaries directory (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path src-tauri\binaries
+
+      - name: Download ffmpeg (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $zip = "$env:TEMP\ffmpeg.zip"
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath "$env:TEMP\ffmpeg"
+          $exe = Get-ChildItem -Path "$env:TEMP\ffmpeg" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          $probe = Get-ChildItem -Path "$env:TEMP\ffmpeg" -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
+          Copy-Item -Path $exe.FullName -Destination src-tauri\binaries\ffmpeg.exe
+          Copy-Item -Path $probe.FullName -Destination src-tauri\binaries\ffprobe.exe
+
+      - name: Enable binaries resources (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          (Get-Content src-tauri\tauri.conf.json) -replace '"resources"\s*:\s*\[.*\]', '"resources": ["binaries/**"]' | Set-Content src-tauri\tauri.conf.json
+
       - name: Build release bundles
         run: npm run tauri:build
 
@@ -53,3 +107,10 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: |
             src-tauri/target/release/bundle/**/*
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: src-tauri/target/release/bundle/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -260,6 +260,18 @@ gh release create v1.0.0 --title "v1.0.0" --notes "Release v1.0.0"
 
 必要なら、Release ワークフローに GitHub Release の自動作成・アセット添付を追加します。ご希望なら次で自動リリース化を実装します。
 
+## ffmpeg バンドルとライセンス
+
+- リリースビルドでは、必要に応じて `ffmpeg` / `ffprobe` のスタティックビルドを CI 上でダウンロードし、`src-tauri/binaries/` に配置して Tauri の `resources` としてパッケージに含めます。
+- ランタイムでは優先順位は次の通りです:
+    1. 環境変数 `UGOMEMO_FFMPEG_PATH` / `UGOMEMO_FFPROBE_PATH` に指定されたパス
+    2. アプリケーションバンドル内の `binaries/ffmpeg(.exe)` / `binaries/ffprobe(.exe)`（インストーラに含めた場合）
+    3. システム `PATH` 上の `ffmpeg` / `ffprobe`
+- CI の Release ワークフローはタグ push 時にのみ `src-tauri/binaries/` を生成して `tauri build` を実行します。ローカル開発中は `ffmpeg` がローカル環境にインストールされていることを期待します。
+- ライセンス: `ffmpeg` はビルド構成により LGPL または GPL に該当します。配布バイナリに同梱するライセンス/NOTICE ファイルはリリースアーティファクトに含めています。
+
+ローカルでバンドルされた `ffmpeg` をテストしたい場合は、`src-tauri/binaries/` に実行可能な `ffmpeg` / `ffprobe` バイナリを置くか、環境変数でパスを指定してから `npm run tauri:build` を実行してください。
+
 
 ## ドキュメント
 

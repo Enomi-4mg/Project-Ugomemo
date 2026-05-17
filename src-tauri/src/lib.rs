@@ -425,7 +425,7 @@ fn encode_wav_to_mp3_file(path: String, wav_bytes: Vec<u8>) -> Result<String, St
     let temp_path = std::env::temp_dir().join(temp_name);
     fs::write(&temp_path, wav_bytes).map_err(|error| error.to_string())?;
 
-    let output = Command::new("ffmpeg")
+    let output = Command::new(ffmpeg_cmd())
         .arg("-y")
         .arg("-v")
         .arg("error")
@@ -642,7 +642,7 @@ fn export_video_from_pngs(
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
 
-    let mut command = Command::new("ffmpeg");
+    let mut command = Command::new(ffmpeg_cmd());
     command
         .arg("-y")
         .arg("-framerate")
@@ -737,11 +737,21 @@ fn cancel_active_export() -> Result<(), String> {
     let process_lock = EXPORT_PROCESS_ID.get_or_init(|| Mutex::new(None));
     let mut current_process_id = process_lock.lock().map_err(|error| error.to_string())?;
     if let Some(pid) = *current_process_id {
-        Command::new("kill")
-            .arg("-TERM")
-            .arg(pid.to_string())
-            .status()
-            .map_err(|error| error.to_string())?;
+        if cfg!(windows) {
+            Command::new("taskkill")
+                .arg("/PID")
+                .arg(pid.to_string())
+                .arg("/T")
+                .arg("/F")
+                .status()
+                .map_err(|error| error.to_string())?;
+        } else {
+            Command::new("kill")
+                .arg("-TERM")
+                .arg(pid.to_string())
+                .status()
+                .map_err(|error| error.to_string())?;
+        }
     }
     *current_process_id = None;
     Ok(())
@@ -849,8 +859,68 @@ fn resolve_asset_path(project_dir: Option<&Path>, path: &str) -> PathBuf {
     }
 }
 
+fn ffmpeg_cmd() -> String {
+    if let Ok(val) = std::env::var("UGOMEMO_FFMPEG_PATH") {
+        return val;
+    }
+    let names: Vec<&str> = if cfg!(windows) { vec!["ffmpeg.exe", "ffmpeg"] } else { vec!["ffmpeg"] };
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            for name in &names {
+                let p = dir.join("binaries").join(name);
+                if p.exists() {
+                    return p.to_string_lossy().to_string();
+                }
+                let p2 = dir.join("resources").join("binaries").join(name);
+                if p2.exists() {
+                    return p2.to_string_lossy().to_string();
+                }
+            }
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        for name in &names {
+            let p = cwd.join("src-tauri").join("binaries").join(name);
+            if p.exists() {
+                return p.to_string_lossy().to_string();
+            }
+        }
+    }
+    names[0].to_string()
+}
+
+fn ffprobe_cmd() -> String {
+    if let Ok(val) = std::env::var("UGOMEMO_FFPROBE_PATH") {
+        return val;
+    }
+    let names: Vec<&str> = if cfg!(windows) { vec!["ffprobe.exe", "ffprobe"] } else { vec!["ffprobe"] };
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            for name in &names {
+                let p = dir.join("binaries").join(name);
+                if p.exists() {
+                    return p.to_string_lossy().to_string();
+                }
+                let p2 = dir.join("resources").join("binaries").join(name);
+                if p2.exists() {
+                    return p2.to_string_lossy().to_string();
+                }
+            }
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        for name in &names {
+            let p = cwd.join("src-tauri").join("binaries").join(name);
+            if p.exists() {
+                return p.to_string_lossy().to_string();
+            }
+        }
+    }
+    names[0].to_string()
+}
+
 fn probe_audio_duration_ms(path: &str) -> Result<u64, String> {
-    let output = Command::new("ffprobe")
+    let output = Command::new(ffprobe_cmd())
         .arg("-v")
         .arg("error")
         .arg("-show_entries")
@@ -900,7 +970,7 @@ fn summarize_audio_file_bytes(path: &Path) -> Result<Vec<f32>, String> {
 }
 
 fn summarize_audio_with_ffmpeg(path: &Path, buckets: usize) -> Result<Vec<f32>, String> {
-    let output = Command::new("ffmpeg")
+    let output = Command::new(ffmpeg_cmd())
         .arg("-v")
         .arg("error")
         .arg("-i")

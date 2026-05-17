@@ -1,0 +1,9 @@
+FFmpeg license notice
+
+This release may include FFmpeg binaries bundled by CI.
+FFmpeg is distributed under the terms of the LGPL or GPL depending on the build configuration.
+
+For the exact license text and build options used, consult the FFmpeg project:
+https://ffmpeg.org/legal.html
+
+If you redistribute these binaries, ensure you comply with FFmpeg's license requirements and include appropriate LICENSE/NOTICE files.

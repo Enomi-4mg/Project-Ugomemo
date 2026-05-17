@@ -1,0 +1,4 @@
+#!/bin/sh
+# placeholder ffprobe binary for CI / local checks
+echo "ffprobe placeholder"
+exit 0
