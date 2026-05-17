@@ -37,6 +37,12 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Ubuntu system dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libglib2.0-dev
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
@@ -59,25 +65,35 @@ jobs:
           set -e
           mkdir -p src-tauri/binaries
           if [ "$(uname)" = "Darwin" ]; then
-            curl -L -o /tmp/ffmpeg.zip "https://evermeet.cx/ffmpeg/ffmpeg-6.1.zip" || true
-            unzip -o /tmp/ffmpeg.zip -d /tmp/ffmpeg || true
-            cp /tmp/ffmpeg/ffmpeg src-tauri/binaries/ffmpeg || true
-            cp /tmp/ffmpeg/ffprobe src-tauri/binaries/ffprobe || true
-            chmod +x src-tauri/binaries/ffmpeg src-tauri/binaries/ffprobe || true
+            curl -L --fail -o /tmp/ffmpeg.zip "https://evermeet.cx/ffmpeg/ffmpeg-6.1.zip"
+            curl -L --fail -o /tmp/ffprobe.zip "https://evermeet.cx/ffmpeg/ffprobe-6.1.zip"
+            unzip -o /tmp/ffmpeg.zip -d /tmp/ffmpeg
+            unzip -o /tmp/ffprobe.zip -d /tmp/ffprobe
+            cp /tmp/ffmpeg/ffmpeg src-tauri/binaries/ffmpeg
+            cp /tmp/ffprobe/ffprobe src-tauri/binaries/ffprobe
+            chmod +x src-tauri/binaries/ffmpeg src-tauri/binaries/ffprobe
           else
-            curl -L -o /tmp/ff.tgz "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+            curl -L --fail -o /tmp/ff.tgz "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
             tar -xJf /tmp/ff.tgz -C /tmp
             cp /tmp/ffmpeg-*-amd64-static/ffmpeg src-tauri/binaries/ffmpeg
             cp /tmp/ffmpeg-*-amd64-static/ffprobe src-tauri/binaries/ffprobe
             chmod +x src-tauri/binaries/ffmpeg src-tauri/binaries/ffprobe
           fi
 
-      - name: Enable binaries resources (Unix)
+      - name: Validate bundled binaries (Unix)
         if: matrix.os != 'windows-latest'
         shell: bash
         run: |
           set -e
-          sed -E -i.bak 's/"resources"\s*:\s*\[.*\]/"resources": ["binaries\/**"]/' src-tauri/tauri.conf.json || true
+          test -x src-tauri/binaries/ffmpeg
+          test -x src-tauri/binaries/ffprobe
+          ls -la src-tauri/binaries
+
+      - name: Enable binaries resources (Unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          node -e "const fs=require('fs'); const p='src-tauri/tauri.conf.json'; const c=JSON.parse(fs.readFileSync(p,'utf8')); c.bundle.resources=['binaries/**']; fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');"
 
       - name: Create binaries directory (Windows)
         if: matrix.os == 'windows-latest'
@@ -88,22 +104,65 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $zip = "$env:TEMP\ffmpeg.zip"
+          $extractDir = "$env:TEMP\ffmpeg"
+          if (Test-Path $extractDir) {
+            Remove-Item -Recurse -Force $extractDir
+          }
           Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $zip
-          Expand-Archive -Path $zip -DestinationPath "$env:TEMP\ffmpeg"
+          Expand-Archive -Path $zip -DestinationPath $extractDir -Force
           $exe = Get-ChildItem -Path "$env:TEMP\ffmpeg" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
           $probe = Get-ChildItem -Path "$env:TEMP\ffmpeg" -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
+          if (-not $exe) {
+            throw "ffmpeg.exe was not found in the downloaded archive."
+          }
+          if (-not $probe) {
+            throw "ffprobe.exe was not found in the downloaded archive."
+          }
           Copy-Item -Path $exe.FullName -Destination src-tauri\binaries\ffmpeg.exe
           Copy-Item -Path $probe.FullName -Destination src-tauri\binaries\ffprobe.exe
+
+      - name: Validate bundled binaries (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Get-ChildItem -Path src-tauri\binaries
+          if (-not (Test-Path src-tauri\binaries\ffmpeg.exe)) {
+            throw "src-tauri\binaries\ffmpeg.exe is missing."
+          }
+          if (-not (Test-Path src-tauri\binaries\ffprobe.exe)) {
+            throw "src-tauri\binaries\ffprobe.exe is missing."
+          }
 
       - name: Enable binaries resources (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          (Get-Content src-tauri\tauri.conf.json) -replace '"resources"\s*:\s*\[.*\]', '"resources": ["binaries/**"]' | Set-Content src-tauri\tauri.conf.json
+          $ErrorActionPreference = "Stop"
+          $configPath = "src-tauri\tauri.conf.json"
+          $config = Get-Content $configPath -Raw | ConvertFrom-Json
+          $config.bundle.resources = @("binaries/**")
+          $config | ConvertTo-Json -Depth 100 | Set-Content $configPath
 
       - name: Build release bundles
         run: npm run tauri:build
+
+      - name: Verify macOS icon bundle output
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          set -e
+          node -e "const fs=require('fs'); const c=JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json','utf8')); if (!Array.isArray(c.bundle?.icon) || !c.bundle.icon.includes('icons/icon.icns')) { throw new Error('tauri.conf.json must include bundle.icon entry icons/icon.icns'); }"
+          test -f src-tauri/icons/icon.icns
+          icon_count="$(find src-tauri/target/release/bundle -path '*/icon.icns' -type f | wc -l | tr -d ' ')"
+          if [ "$icon_count" -eq 0 ]; then
+            echo "No generated icon.icns found under src-tauri/target/release/bundle."
+            find src-tauri/target/release/bundle -maxdepth 5 -type f
+            exit 1
+          fi
+          find src-tauri/target/release/bundle -path '*/icon.icns' -type f -print
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
@@ -111,6 +170,7 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: |
             src-tauri/target/release/bundle/**/*
+          if-no-files-found: error
 
       - name: Create GitHub Release and upload assets
         uses: softprops/action-gh-release@v1
