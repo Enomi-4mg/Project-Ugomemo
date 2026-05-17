@@ -191,6 +191,12 @@ npm install
 npm run dev
 ```
 
+## Windows対応とCI
+
+- Windows では GitHub Actions の Release Build で `msi` / `exe` / `zip` を生成します。
+- Pull Request では macOS と Windows の両方で `npm run build` と `cargo check` を実行します。
+- ローカルの生成物として `dist/` と `src-tauri/target/` は git 管理しません。
+
 ## ドキュメント
 
 - [設計書](./docs/DESIGN.md)
