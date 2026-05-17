@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ButtonHTMLAttributes, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -45,7 +45,6 @@ import {
   Volume2,
   VolumeX,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import { createHistory, pushHistory, redo, undo, type HistoryState } from "../drawing/history";
 import {
@@ -64,7 +63,7 @@ import {
 } from "../drawing/project";
 import { renderProject } from "../drawing/renderer";
 import { getCanvasPoint } from "../drawing/tools";
-import { drawingToolOrder, drawingToolRegistry, tonePatternOptions, type DrawingSession, type DrawingToolId, type Point, type ToolSettings } from "../drawing/toolStrategies";
+import { drawingToolOrder, drawingToolRegistry, type DrawingSession, type DrawingToolId, type Point, type ToolSettings } from "../drawing/toolStrategies";
 import type { DrawingProject, Frame, Layer, PaletteColor, Tool } from "../drawing/types";
 import {
   canUseTauri,
@@ -89,37 +88,29 @@ import {
   type PersistedAudioTrack,
   type ProjectPackagePaths,
 } from "../tauri/projectCommands";
-
-const VIEWPORT_WIDTH = 860;
-const VIEWPORT_HEIGHT = 620;
-const PLAYBACK_SPEEDS = [0.2, 0.5, 1, 2, 4, 6, 8, 12, 20, 24, 30] as const;
-
-type AppMode = "draw" | "edit" | "playback" | "audio";
-type DialogState = "none" | "new-warning" | "export" | "create-page" | "record";
-type SaveIntent = "manual" | "new-project";
-type PageCreateDirection = "prepend" | "append";
-type ExportTab = "image" | "video";
-type ImageExportFormat = "JPEG" | "PNG" | "WebP";
-type VideoExportFormat = "MP4" | "WebM" | "GIF" | "APNG" | "Sprite Sheet" | "Audio Only (WAV)";
-type ImageExportScope = "all" | "partial";
-type RecordingFormat = "wav" | "mp3";
-type ExportAudioQuality = "high" | "lofi";
-type MicrophonePermissionState = "idle" | "checking" | "granted" | "denied" | "unsupported";
-type TimelineClipSource = "material" | "recording";
-type TimelineSourceDragPayload = { kind: "source"; id: string; type: TimelineClipSource };
-type TimelineMoveDragPayload = { kind: "clip"; clipId: string; offsetFrames: number };
-type TimelineDragPayload = TimelineSourceDragPayload | TimelineMoveDragPayload;
-type PointerTimelineDrag = {
-  payload: TimelineDragPayload;
-  name: string;
-  extension?: string;
-  durationFrames: number;
-  pointerX: number;
-  pointerY: number;
-  startX: number;
-  startY: number;
-  hasMoved: boolean;
-};
+import { IconButton } from "./components/IconButton";
+import { IMAGE_EXPORT_FORMATS, PLAYBACK_SPEEDS, VIDEO_EXPORT_FORMATS, VIEWPORT_HEIGHT, VIEWPORT_WIDTH, Z_DEPTHS } from "./constants";
+import { detectPlatform, getShortcutLabel, isPrimaryModifier, isPrimaryModifierKey } from "./keyboard/shortcuts";
+import { buildTonePattern, parseTonePattern, TONE_PATTERN_BASES, TONE_PATTERN_SIZES, type TonePatternBase, type TonePatternSize } from "./tone/tonePattern";
+import type {
+  AppMode,
+  DialogState,
+  ExportAudioQuality,
+  ExportTab,
+  ImageExportFormat,
+  ImageExportScope,
+  MicrophonePermissionState,
+  PageCreateDirection,
+  PointerTimelineDrag,
+  RecordingFormat,
+  SaveIntent,
+  TimelineClip,
+  TimelineClipSource,
+  TimelineDragPayload,
+  TimelineMoveDragPayload,
+  TimelineSourceDragPayload,
+  VideoExportFormat,
+} from "./types";
 
 type RecordedAudio = {
   id: string;
@@ -134,23 +125,6 @@ type AudioAssetContextMenu = {
   sourceKind: "material" | "recording";
   x: number;
   y: number;
-};
-
-type TimelineClip = {
-  id: string;
-  sourceId: string;
-  sourceType: TimelineClipSource;
-  name: string;
-  trackIndex: number;
-  startFrame: number;
-  durationFrames: number;
-  sourceOffsetFrames: number;
-  loopCount: number;
-  reversed: boolean;
-  volume: number;
-  panning: number;
-  fadeInFrames: number;
-  fadeOutFrames: number;
 };
 
 type ClipDragState = {
@@ -196,34 +170,15 @@ function createDefaultToolSettingsByTool(): Record<DrawingToolId, ToolSettings> 
   );
 }
 
-const zDepths = [1, 2, 3, 4, 5, 6, 7];
-const imageExportFormats: ImageExportFormat[] = ["JPEG", "PNG", "WebP"];
-const videoExportFormats: VideoExportFormat[] = ["MP4", "WebM", "GIF", "APNG", "Sprite Sheet", "Audio Only (WAV)"];
-const drawingToolIcons: Record<DrawingToolId, LucideIcon> = {
+const drawingToolIcons = {
   pen: Pencil,
   tone: CircleDot,
   eraser: Eraser,
   shape: Shapes,
-};
-
-function IconButton({
-  className,
-  icon: Icon,
-  label,
-  showLabel = false,
-  ...buttonProps
-}: ButtonHTMLAttributes<HTMLButtonElement> & { icon: LucideIcon; label: string; showLabel?: boolean }) {
-  const iconButtonClassName = ["icon-button", showLabel ? "labeled-icon-button" : "", className].filter(Boolean).join(" ");
-
-  return (
-    <button {...buttonProps} aria-label={label} className={iconButtonClassName} title={label} type="button">
-      <Icon aria-hidden="true" size={18} strokeWidth={2.4} />
-      <span className={showLabel ? "icon-button-label" : "sr-only"}>{label}</span>
-    </button>
-  );
-}
+} satisfies Record<DrawingToolId, typeof Pencil>;
 
 export function App() {
+  const platform = useMemo(() => detectPlatform(), []);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const toolPreviewRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLElement | null>(null);
@@ -760,9 +715,9 @@ export function App() {
       }
 
       const key = event.key.toLowerCase();
-      const hasCommandModifier = event.metaKey || event.ctrlKey;
+      const hasPrimaryModifier = isPrimaryModifier(event, platform);
 
-      if (event.key === "Meta") {
+      if (isPrimaryModifierKey(event, platform)) {
         if (pageCreatePromptVisible) {
           cancelPagePrompt();
         }
@@ -770,8 +725,8 @@ export function App() {
         return;
       }
 
-      const isUndo = hasCommandModifier && key === "z" && !event.shiftKey;
-      const isRedo = hasCommandModifier && key === "z" && event.shiftKey;
+      const isUndo = hasPrimaryModifier && key === "z" && !event.shiftKey;
+      const isRedo = hasPrimaryModifier && key === "z" && event.shiftKey;
 
       if (isUndo) {
         event.preventDefault();
@@ -812,25 +767,25 @@ export function App() {
           return;
         }
 
-        if (hasCommandModifier && key === "c") {
+        if (hasPrimaryModifier && key === "c") {
           event.preventDefault();
           copySelectedClip();
           return;
         }
 
-        if (hasCommandModifier && key === "v") {
+        if (hasPrimaryModifier && key === "v") {
           event.preventDefault();
           pasteClipAtPlayhead();
           return;
         }
       } else {
-        if (hasCommandModifier && key === "c") {
+        if (hasPrimaryModifier && key === "c") {
           event.preventDefault();
           copyCurrentFrame();
           return;
         }
 
-        if (hasCommandModifier && key === "v") {
+        if (hasPrimaryModifier && key === "v") {
           event.preventDefault();
           pasteFrame();
           return;
@@ -843,7 +798,7 @@ export function App() {
         }
       }
 
-      if (!hasCommandModifier && !event.altKey) {
+      if (!hasPrimaryModifier && !event.altKey) {
         if (key === "t") {
           event.preventDefault();
           cancelPagePrompt();
@@ -897,7 +852,7 @@ export function App() {
     };
 
     const onKeyUp = (event: KeyboardEvent) => {
-      if (event.key === "Meta") {
+      if (isPrimaryModifierKey(event, platform)) {
         setOnionSkinEnabled(false);
       }
     };
@@ -908,7 +863,7 @@ export function App() {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [fileOperation.active, history, isPlaying, mode, pageCreatePromptVisible, playbackIndex, project, rapidPageCreationDirection, selectedClipId, timelineClips, clipClipboard, copiedFrame]);
+  }, [fileOperation.active, history, isPlaying, mode, pageCreatePromptVisible, platform, playbackIndex, project, rapidPageCreationDirection, selectedClipId, timelineClips, clipClipboard, copiedFrame]);
 
   function commit(nextProject: DrawingProject) {
     setProject(nextProject);
@@ -2734,19 +2689,91 @@ export function App() {
   }
 
   function renderToolSettingsPanel() {
+    const tonePattern = parseTonePattern(toolSettings.tonePattern);
+    const updateTonePatternBase = (base: TonePatternBase) => {
+      setToolSettings((current) => {
+        const currentPattern = parseTonePattern(current.tonePattern);
+        return { ...current, tonePattern: buildTonePattern(base, currentPattern.size) };
+      });
+    };
+    const updateTonePatternSize = (size: TonePatternSize) => {
+      setToolSettings((current) => {
+        const currentPattern = parseTonePattern(current.tonePattern);
+        return { ...current, tonePattern: buildTonePattern(currentPattern.base, size) };
+      });
+    };
+
     return (
       <div className="tool-settings-grid">
-        <label>
-          {tool === "tone" ? "Density" : "Stroke Weight"}
-          {tool === "tone" ? (
-            <input
-              min="1"
-              max="24"
-              type="range"
-              value={toolSettings.toneDensity}
-              onChange={(event) => setToolSettings((current) => ({ ...current, toneDensity: Number(event.target.value) }))}
-            />
-          ) : (
+        {tool === "tone" ? (
+          <>
+            <div className="segmented-control-field">
+              <span>Tone Mode</span>
+              <div className="segmented-control" role="group" aria-label="Tone mode">
+                <button
+                  className={toolSettings.toneMode === "pen" ? "active" : ""}
+                  onClick={() => setToolSettings((current) => ({ ...current, toneMode: "pen" }))}
+                  type="button"
+                >
+                  Pen
+                </button>
+                <button
+                  className={toolSettings.toneMode === "bucket" ? "active" : ""}
+                  onClick={() => setToolSettings((current) => ({ ...current, toneMode: "bucket" }))}
+                  type="button"
+                >
+                  Bucket
+                </button>
+              </div>
+            </div>
+
+            <div className="segmented-control-field">
+              <span>Pattern</span>
+              <div className="segmented-control tone-pattern-control" role="group" aria-label="Tone pattern">
+                {TONE_PATTERN_BASES.map((option) => (
+                  <button
+                    className={tonePattern.base === option.value ? "active" : ""}
+                    key={option.value}
+                    onClick={() => updateTonePatternBase(option.value)}
+                    type="button"
+                  >
+                    <span className={`tone-pattern-swatch ${option.value}`} aria-hidden="true" />
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="segmented-control-field">
+              <span>Scale</span>
+              <div className="segmented-control" role="group" aria-label="Tone scale">
+                {TONE_PATTERN_SIZES.map((option) => (
+                  <button
+                    className={tonePattern.size === option.value ? "active" : ""}
+                    key={option.value}
+                    onClick={() => updateTonePatternSize(option.value)}
+                    type="button"
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <label>
+              Density
+              <input
+                min="1"
+                max="24"
+                type="range"
+                value={toolSettings.toneDensity}
+                onChange={(event) => setToolSettings((current) => ({ ...current, toneDensity: Number(event.target.value) }))}
+              />
+            </label>
+          </>
+        ) : (
+          <label>
+            Stroke Weight
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <input
                 min="1"
@@ -2764,8 +2791,8 @@ export function App() {
                 style={{ width: 64 }}
               />
             </div>
-          )}
-        </label>
+          </label>
+        )}
 
         {(tool === "pen" || tool === "eraser" || tool === "shape" || (tool === "tone" && toolSettings.toneMode === "pen")) && (
           <label>
@@ -2829,35 +2856,6 @@ export function App() {
           </p>
         )}
 
-        {tool === "tone" && (
-          <>
-            <IconButton
-              className={toolSettings.toneMode === "bucket" ? "tool-button active" : "tool-button"}
-              icon={PaintBucket}
-              label={`Bucket fill mode ${toolSettings.toneMode === "bucket" ? "on" : "off"}`}
-              onClick={() =>
-                setToolSettings((current) => ({
-                  ...current,
-                  toneMode: current.toneMode === "bucket" ? "pen" : "bucket",
-                }))
-              }
-            />
-            <label>
-              Tone Pattern
-              <select
-                value={toolSettings.tonePattern}
-                onChange={(event) => setToolSettings((current) => ({ ...current, tonePattern: event.target.value as ToolSettings["tonePattern"] }))}
-              >
-                {tonePatternOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </>
-        )}
-
         <p className="tool-color-readout">
           Color <strong>{selectedColor.name}</strong>
         </p>
@@ -2918,7 +2916,7 @@ export function App() {
           <div className="bottom-z-selector" aria-label="Active layer Z depth selector">
             <span>{activeLayer.name}</span>
             <div className="bottom-z-rail">
-              {zDepths.map((depth) => (
+              {Z_DEPTHS.map((depth) => (
                 <button
                   aria-label={`${activeLayer.name} depth ${depth}`}
                   className={activeLayer.zDepth === depth ? "z-depth active-z-depth" : "z-depth"}
@@ -3064,8 +3062,8 @@ export function App() {
             {renderFrameRail("frame-rail edit-frame-rail")}
             <div className="edit-actions">
               <IconButton icon={BrushCleaning} label="Clear frame" showLabel onClick={clearCurrentFrame} />
-              <IconButton icon={Copy} label="Copy frame" showLabel onClick={copyCurrentFrame} />
-              <IconButton icon={FilePenLine} label="Paste frame" showLabel onClick={pasteFrame} />
+              <IconButton icon={Copy} label={`Copy frame (${getShortcutLabel("copy", platform)})`} showLabel onClick={copyCurrentFrame} />
+              <IconButton icon={FilePenLine} label={`Paste frame (${getShortcutLabel("paste", platform)})`} showLabel onClick={pasteFrame} />
               <IconButton icon={CopyPlus} label="Duplicate frame" showLabel onClick={duplicateFrame} />
               <IconButton icon={SquarePen} label="Insert new frame" showLabel onClick={insertNewFrame} />
               <IconButton icon={Trash2} label="Delete frame" showLabel onClick={deleteCurrentFrame} />
@@ -3469,7 +3467,7 @@ export function App() {
                 }}
                 value={imageExportFormat}
               >
-                {imageExportFormats.map((format) => (
+                {IMAGE_EXPORT_FORMATS.map((format) => (
                   <option key={format} value={format}>{format}</option>
                 ))}
               </select>
@@ -3484,7 +3482,7 @@ export function App() {
                 }}
                 value={videoExportFormat}
               >
-                {videoExportFormats.map((format) => (
+                {VIDEO_EXPORT_FORMATS.map((format) => (
                   <option key={format} value={format}>{format}</option>
                 ))}
               </select>
@@ -3631,8 +3629,8 @@ export function App() {
           <IconButton icon={FolderOpen} label="Load project" onClick={() => void handleLoadProject()} />
           <IconButton icon={SaveAll} label="Save project as" onClick={() => void handleSaveAsProject("manual")} />
           <IconButton icon={Download} label="Export project" onClick={() => void openExportDialog()} />
-          <IconButton icon={Undo2} label="Undo" onClick={applyUndo} />
-          <IconButton icon={Redo2} label="Redo" onClick={applyRedo} />
+          <IconButton icon={Undo2} label={`Undo (${getShortcutLabel("undo", platform)})`} onClick={applyUndo} />
+          <IconButton icon={Redo2} label={`Redo (${getShortcutLabel("redo", platform)})`} onClick={applyRedo} />
         </div>
       </header>
 
@@ -3648,8 +3646,8 @@ export function App() {
         >
           <IconButton icon={Trash2} label="Delete clip" onClick={deleteSelectedClip} />
           <IconButton icon={CopyPlus} label="Duplicate clip" onClick={duplicateSelectedClip} />
-          <IconButton icon={Copy} label="Copy clip" onClick={copySelectedClip} />
-          <IconButton icon={Upload} label="Paste clip at playhead" onClick={pasteClipAtPlayhead} />
+          <IconButton icon={Copy} label={`Copy clip (${getShortcutLabel("copy", platform)})`} onClick={copySelectedClip} />
+          <IconButton icon={Upload} label={`Paste clip at playhead (${getShortcutLabel("paste", platform)})`} onClick={pasteClipAtPlayhead} />
           <IconButton icon={Scissors} label="Split clip" onClick={splitSelectedClip} />
           <IconButton icon={RotateCcw} label="Reverse clip" onClick={reverseSelectedClip} />
         </div>
