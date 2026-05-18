@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Ban,
   Blend,
+  Paintbrush,
   BrushCleaning,
   CircleDot,
   Copy,
@@ -147,12 +148,16 @@ type PendingShapeStep = {
   shapeType: "triangle" | "ellipse" | "rectangle";
 };
 
+const TOOL_SETTINGS_STORAGE_KEY = "project-ugomemo.tool-settings.v1";
+
 function createDefaultToolSettings(tool: DrawingToolId = "pen"): ToolSettings {
   return {
     color: [0, 0, 0, 255],
     size: drawingToolRegistry[tool].defaultSize,
     toneDensity: drawingToolRegistry.tone.defaultSize,
     penShape: "round",
+    brushSpacing: 25,
+    brushScatter: 0,
     shapeType: "line",
     toneMode: "pen",
     tonePattern: "dot-medium",
@@ -171,8 +176,72 @@ function createDefaultToolSettingsByTool(): Record<DrawingToolId, ToolSettings> 
   );
 }
 
+function loadSavedToolSettingsByTool(): Record<DrawingToolId, ToolSettings> {
+  const defaults = createDefaultToolSettingsByTool();
+  if (typeof window === "undefined") {
+    return defaults;
+  }
+
+  try {
+    const rawSettings = window.localStorage.getItem(TOOL_SETTINGS_STORAGE_KEY);
+    if (!rawSettings) {
+      return defaults;
+    }
+
+    const parsed = JSON.parse(rawSettings) as Partial<Record<DrawingToolId, Partial<ToolSettings>>>;
+    return drawingToolOrder.reduce(
+      (settingsByTool, toolId) => ({
+        ...settingsByTool,
+        [toolId]: normalizeSavedToolSettings(defaults[toolId], parsed[toolId]),
+      }),
+      {} as Record<DrawingToolId, ToolSettings>,
+    );
+  } catch {
+    return defaults;
+  }
+}
+
+function saveToolSettingsByTool(settingsByTool: Record<DrawingToolId, ToolSettings>): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    const serializableSettings = drawingToolOrder.reduce(
+      (settings, toolId) => ({
+        ...settings,
+        [toolId]: {
+          ...settingsByTool[toolId],
+          color: undefined,
+        },
+      }),
+      {} as Record<DrawingToolId, Partial<ToolSettings>>,
+    );
+    window.localStorage.setItem(TOOL_SETTINGS_STORAGE_KEY, JSON.stringify(serializableSettings));
+  } catch {
+    // Ignore storage failures; drawing should keep working even in private mode.
+  }
+}
+
+function normalizeSavedToolSettings(defaults: ToolSettings, saved: Partial<ToolSettings> | undefined): ToolSettings {
+  return {
+    ...defaults,
+    size: clampBrushSize(saved?.size ?? defaults.size),
+    toneDensity: clampToneDensity(saved?.toneDensity ?? defaults.toneDensity),
+    penShape: saved?.penShape === "square" ? "square" : "round",
+    brushSpacing: clampToolPercent(saved?.brushSpacing ?? defaults.brushSpacing),
+    brushScatter: clampToolPercent(saved?.brushScatter ?? defaults.brushScatter),
+    shapeType: saved?.shapeType === "ellipse" || saved?.shapeType === "triangle" || saved?.shapeType === "rectangle" ? saved.shapeType : defaults.shapeType,
+    toneMode: saved?.toneMode === "bucket" ? "bucket" : "pen",
+    tonePattern: isTonePattern(saved?.tonePattern) ? saved.tonePattern : defaults.tonePattern,
+    shapeFill: saved?.shapeFill ?? defaults.shapeFill,
+    antialias: saved?.antialias ?? defaults.antialias,
+  };
+}
+
 const drawingToolIcons = {
   pen: Pencil,
+  brush: Paintbrush,
   tone: CircleDot,
   eraser: Eraser,
   shape: Shapes,
@@ -226,7 +295,7 @@ export function App() {
   const [history, setHistory] = useState<HistoryState>(() => createHistory(project));
   const [mode, setMode] = useState<AppMode>("draw");
   const [tool, setTool] = useState<Tool>("pen");
-  const [toolSettingsByTool, setToolSettingsByTool] = useState<Record<DrawingToolId, ToolSettings>>(() => createDefaultToolSettingsByTool());
+  const [toolSettingsByTool, setToolSettingsByTool] = useState<Record<DrawingToolId, ToolSettings>>(() => loadSavedToolSettingsByTool());
   const [colorSlot, setColorSlot] = useState<0 | 1>(0);
   const [pendingShapeStep, setPendingShapeStep] = useState<PendingShapeStep | null>(null);
   const [status, setStatus] = useState("Ready");
@@ -318,6 +387,10 @@ export function App() {
       };
     });
   }
+
+  useEffect(() => {
+    saveToolSettingsByTool(toolSettingsByTool);
+  }, [toolSettingsByTool]);
 
   function adjustBrushSize(delta: number) {
     if (tool === "tone" && toolSettings.toneMode === "bucket") {
@@ -847,6 +920,13 @@ export function App() {
           event.preventDefault();
           cancelPagePrompt();
           setTool("pen");
+          return;
+        }
+
+        if (isShortcutAction(event, "selectBrush", platform)) {
+          event.preventDefault();
+          cancelPagePrompt();
+          setTool("brush");
           return;
         }
 
@@ -2833,30 +2913,57 @@ export function App() {
             </label>
           </>
         ) : (
-          <label>
-            Stroke Weight
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input
-                min={BRUSH_SIZE_MIN}
-                max={BRUSH_SIZE_MAX}
-                type="range"
-                value={toolSettings.size}
-                onChange={(event) => setToolSettings((current) => ({ ...current, size: clampBrushSize(Number(event.target.value)) }))}
-              />
-              <input
-                type="number"
-                min={BRUSH_SIZE_MIN}
-                max={BRUSH_SIZE_MAX}
-                step={1}
-                value={toolSettings.size}
-                onChange={(event) => setToolSettings((current) => ({ ...current, size: clampBrushSize(Number(event.target.value)) }))}
-                style={{ width: 64 }}
-              />
-            </div>
-          </label>
+          <>
+            <label>
+              Stroke Weight
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  min={BRUSH_SIZE_MIN}
+                  max={BRUSH_SIZE_MAX}
+                  type="range"
+                  value={toolSettings.size}
+                  onChange={(event) => setToolSettings((current) => ({ ...current, size: clampBrushSize(Number(event.target.value)) }))}
+                />
+                <input
+                  type="number"
+                  min={BRUSH_SIZE_MIN}
+                  max={BRUSH_SIZE_MAX}
+                  step={1}
+                  value={toolSettings.size}
+                  onChange={(event) => setToolSettings((current) => ({ ...current, size: clampBrushSize(Number(event.target.value)) }))}
+                  style={{ width: 64 }}
+                />
+              </div>
+            </label>
+
+            {tool === "brush" && (
+              <>
+                <label>
+                  Spacing %
+                  <input
+                    min="1"
+                    max="200"
+                    type="range"
+                    value={toolSettings.brushSpacing}
+                    onChange={(event) => setToolSettings((current) => ({ ...current, brushSpacing: clampToolPercent(Number(event.target.value)) }))}
+                  />
+                </label>
+                <label>
+                  Scatter %
+                  <input
+                    min="0"
+                    max="200"
+                    type="range"
+                    value={toolSettings.brushScatter}
+                    onChange={(event) => setToolSettings((current) => ({ ...current, brushScatter: clampToolPercent(Number(event.target.value)) }))}
+                  />
+                </label>
+              </>
+            )}
+          </>
         )}
 
-        {(tool === "pen" || tool === "eraser" || tool === "shape" || (tool === "tone" && toolSettings.toneMode === "pen")) && (
+        {(tool === "pen" || tool === "brush" || tool === "eraser" || tool === "shape" || (tool === "tone" && toolSettings.toneMode === "pen")) && (
           <label>
             Stroke Shape
             <select
@@ -2869,7 +2976,7 @@ export function App() {
           </label>
         )}
 
-        {(tool === "pen" || tool === "eraser" || tool === "shape" || (tool === "tone" && toolSettings.toneMode === "pen")) && (
+        {(tool === "pen" || tool === "brush" || tool === "eraser" || tool === "shape" || (tool === "tone" && toolSettings.toneMode === "pen")) && (
           <label>
             Antialias
             <IconButton
@@ -4253,9 +4360,34 @@ function clampBrushSize(size: number): number {
   return Math.min(BRUSH_SIZE_MAX, Math.max(BRUSH_SIZE_MIN, Math.floor(Number.isFinite(size) ? size : BRUSH_SIZE_MIN)));
 }
 
+function clampToolPercent(value: number): number {
+  return Math.min(300, Math.max(0, Math.round(Number.isFinite(value) ? value : 0)));
+}
+
+function clampToneDensity(value: number): number {
+  return Math.min(24, Math.max(1, Math.round(Number.isFinite(value) ? value : 1)));
+}
+
+function isTonePattern(value: unknown): value is ToolSettings["tonePattern"] {
+  return (
+    value === "dot-small" ||
+    value === "dot-medium" ||
+    value === "dot-large" ||
+    value === "line-small" ||
+    value === "line-medium" ||
+    value === "line-large" ||
+    value === "noise-small" ||
+    value === "noise-medium" ||
+    value === "noise-large"
+  );
+}
+
 function getToolShortcut(toolId: DrawingToolId, platform: Platform): string {
   if (toolId === "pen") {
     return getShortcutLabel("selectPen", platform);
+  }
+  if (toolId === "brush") {
+    return getShortcutLabel("selectBrush", platform);
   }
   if (toolId === "tone") {
     return getShortcutLabel("selectTone", platform);

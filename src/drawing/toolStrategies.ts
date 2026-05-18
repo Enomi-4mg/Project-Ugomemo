@@ -1,10 +1,13 @@
 import { getFitCamera } from "./renderer";
 import { cloneImageData } from "./project";
+import { renderBrushStroke } from "./brush/engine";
+import { hashStrokeSeed, seededRandom } from "./brush/seededRandom";
+import { getStrokeShapeDefinition, type StampMask, type StrokeShapeId } from "./strokeShapes";
 import type { Camera, DrawingProject, Layer, PaletteColor, Tool } from "./types";
 import { parseTonePattern, type TonePattern } from "../ui/tone/tonePattern";
 
 export type DrawingToolId = Tool;
-export type PenShape = "round" | "square";
+export type PenShape = StrokeShapeId;
 export type ShapeType = "line" | "ellipse" | "triangle" | "rectangle";
 export type ToneMode = "pen" | "bucket";
 
@@ -13,6 +16,8 @@ export type ToolSettings = {
   size: number;
   toneDensity: number;
   penShape: PenShape;
+  brushSpacing: number;
+  brushScatter: number;
   shapeType: ShapeType;
   toneMode: ToneMode;
   tonePattern: TonePattern;
@@ -105,6 +110,8 @@ abstract class BaseDrawingTool implements DrawingTool {
         size: args.settings.size,
         toneDensity: args.settings.toneDensity,
         penShape: args.settings.penShape,
+        brushSpacing: args.settings.brushSpacing,
+        brushScatter: args.settings.brushScatter,
         shapeType: args.settings.shapeType,
         toneMode: args.settings.toneMode,
         tonePattern: args.settings.tonePattern,
@@ -178,17 +185,12 @@ class PenTool extends BaseDrawingTool {
   readonly defaultSize = 2;
 
   protected paintStroke(session: DrawingSession, settings: ToolSettings): void {
-    drawStrokePath(session.layerContext, session.points, settings, {
-      compositeOperation: "source-over",
-      lineCap: settings.penShape,
-      lineJoin: settings.penShape === "round" ? "round" : "miter",
-      strokeStyle: rgbaToCss(settings.color),
-    });
+    drawPenStroke(session.layerContext, session.points, settings);
   }
 
   drawPreview(context: CanvasRenderingContext2D, settings: ToolSettings): void {
     drawPreviewSurface(context);
-    drawStrokePath(
+    drawPenStroke(
       context,
       [
         { x: 16, y: 26 },
@@ -198,13 +200,47 @@ class PenTool extends BaseDrawingTool {
         { x: 142, y: 28 },
       ],
       settings,
-      {
-        compositeOperation: "source-over",
-        lineCap: settings.penShape,
-        lineJoin: settings.penShape === "round" ? "round" : "miter",
-        strokeStyle: rgbaToCss(settings.color),
-      },
     );
+  }
+}
+
+class BrushTool extends BaseDrawingTool {
+  readonly id = "brush";
+  readonly label = "Brush";
+  readonly defaultSize = 16;
+
+  protected paintStroke(session: DrawingSession, settings: ToolSettings): void {
+    renderBrushStroke({
+      context: session.layerContext,
+      points: session.points,
+      color: settings.color,
+      size: settings.size,
+      spacingPercent: settings.brushSpacing,
+      scatterPercent: settings.brushScatter,
+      stampShape: settings.penShape,
+      antiAlias: settings.antialias ?? false,
+      seed: getSessionSeed(session, settings, 17),
+    });
+  }
+
+  drawPreview(context: CanvasRenderingContext2D, settings: ToolSettings): void {
+    drawPreviewSurface(context);
+    renderBrushStroke({
+      context,
+      points: [
+        { x: 20, y: 72 },
+        { x: 52, y: 42 },
+        { x: 90, y: 78 },
+        { x: 142, y: 36 },
+      ],
+      color: settings.color,
+      size: settings.size,
+      spacingPercent: settings.brushSpacing,
+      scatterPercent: settings.brushScatter,
+      stampShape: settings.penShape,
+      antiAlias: settings.antialias ?? false,
+      seed: hashStrokeSeed([{ x: 20, y: 72 }], 17),
+    });
   }
 }
 
@@ -252,7 +288,18 @@ class ToneTool extends BaseDrawingTool {
       return;
     }
 
-    strokePath(session.layerContext, session.points, settings, createTonePattern(session.layerContext, settings) ?? rgbaToCss(settings.color), "source-over");
+    renderBrushStroke({
+      context: session.layerContext,
+      points: session.points,
+      color: settings.color,
+      size: settings.size,
+      spacingPercent: 25,
+      scatterPercent: 0,
+      stampShape: settings.penShape,
+      antiAlias: settings.antialias ?? false,
+      seed: getSessionSeed(session, settings, 29),
+      patternAlphaAt: createTonePatternAlphaSampler(settings),
+    });
   }
 
   drawPreview(context: CanvasRenderingContext2D, settings: ToolSettings): void {
@@ -263,19 +310,24 @@ class ToneTool extends BaseDrawingTool {
       return;
     }
 
-    strokePath(
+    renderBrushStroke({
       context,
-      [
+      points: [
         { x: 16, y: 26 },
         { x: 48, y: 18 },
         { x: 78, y: 34 },
         { x: 110, y: 16 },
         { x: 142, y: 28 },
       ],
-      settings,
-      createTonePattern(context, settings) ?? rgbaToCss(settings.color),
-      "source-over",
-    );
+      color: settings.color,
+      size: settings.size,
+      spacingPercent: 25,
+      scatterPercent: 0,
+      stampShape: settings.penShape,
+      antiAlias: settings.antialias ?? false,
+      seed: hashStrokeSeed([{ x: 16, y: 26 }], 29),
+      patternAlphaAt: createTonePatternAlphaSampler(settings),
+    });
   }
 
   protected applyToneFill(session: DrawingSession, point: Point, settings: ToolSettings): void {
@@ -430,88 +482,100 @@ class ShapeTool extends BaseDrawingTool {
   }
 }
 
-export const drawingToolOrder: DrawingToolId[] = ["pen", "tone", "eraser", "shape"];
+export const drawingToolOrder: DrawingToolId[] = ["pen", "brush", "tone", "eraser", "shape"];
 
 export const drawingToolRegistry: Record<DrawingToolId, DrawingTool> = {
   pen: new PenTool(),
+  brush: new BrushTool(),
   tone: new ToneTool(),
   eraser: new EraserTool(),
   shape: new ShapeTool(),
 };
 
-function drawStrokePath(
-  context: CanvasRenderingContext2D,
-  points: Point[],
-  settings: ToolSettings,
-  options: {
-    compositeOperation: GlobalCompositeOperation;
-    lineCap: CanvasLineCap;
-    lineJoin: CanvasLineJoin;
-    strokeStyle: string | CanvasPattern;
-  },
-): void {
-  if (!settings.antialias) {
-    // Pixel-perfect stamping for binary pen behaviour
-    const size = Math.max(1, Math.floor(settings.size));
-    const half = Math.floor(size / 2);
-    context.save();
-    context.globalCompositeOperation = options.compositeOperation;
-    context.fillStyle = options.strokeStyle as unknown as string | CanvasPattern;
-
-    const stamp = (x: number, y: number) => {
-      const rx = Math.round(x) - half;
-      const ry = Math.round(y) - half;
-      context.fillRect(rx, ry, size, size);
-    };
-
-    if (points.length === 1) {
-      stamp(points[0].x, points[0].y);
-      context.restore();
-      return;
-    }
-
-    for (let i = 0; i < points.length - 1; i += 1) {
-      const a = points[i];
-      const b = points[i + 1];
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy))));
-      for (let s = 0; s <= steps; s += 1) {
-        const t = s / steps;
-        const x = a.x + dx * t;
-        const y = a.y + dy * t;
-        stamp(x, y);
-      }
-    }
-
-    context.restore();
+function drawPenStroke(context: CanvasRenderingContext2D, points: Point[], settings: ToolSettings): void {
+  if (points.length === 0) {
     return;
   }
 
-  context.save();
-  context.imageSmoothingEnabled = true;
-  context.globalCompositeOperation = options.compositeOperation;
-  context.lineWidth = Math.max(1, settings.size);
-  context.lineCap = options.lineCap;
-  context.lineJoin = options.lineJoin;
-  context.strokeStyle = options.strokeStyle;
-  context.fillStyle = options.strokeStyle;
+  const size = Math.max(1, Math.floor(settings.size));
+  const shape = getStrokeShapeDefinition(settings.penShape);
+  const mask = shape.createMask(size, { antiAlias: settings.antialias ?? false });
+  const imageData = context.getImageData(0, 0, context.canvas.width, context.canvas.height);
+  const stampInterval = Math.max(0.5, size / 3);
+
+  const stamp = (point: Point) => {
+    stampMask(imageData, mask, point, settings.color);
+  };
 
   if (points.length === 1) {
-    context.beginPath();
-    context.arc(points[0].x, points[0].y, Math.max(1, settings.size / 2), 0, Math.PI * 2);
-    context.fill();
-    context.restore();
+    stamp(points[0]);
+    context.putImageData(imageData, 0, 0);
     return;
   }
 
-  context.beginPath();
-  context.moveTo(points[0].x, points[0].y);
-  for (let index = 1; index < points.length; index += 1) {
-    context.lineTo(points[index].x, points[index].y);
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const a = points[i];
+    const b = points[i + 1];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const steps = Math.max(1, Math.ceil(distance / stampInterval));
+    for (let step = 0; step <= steps; step += 1) {
+      const t = step / steps;
+      stamp({ x: a.x + dx * t, y: a.y + dy * t });
+    }
   }
-  context.stroke();
-  context.restore();
+
+  context.putImageData(imageData, 0, 0);
+}
+
+function stampMask(imageData: ImageData, mask: StampMask, point: Point, color: PaletteColor["rgba"]): void {
+  const originX = Math.round(point.x) - Math.floor(mask.width / 2);
+  const originY = Math.round(point.y) - Math.floor(mask.height / 2);
+
+  for (let maskY = 0; maskY < mask.height; maskY += 1) {
+    const y = originY + maskY;
+    if (y < 0 || y >= imageData.height) {
+      continue;
+    }
+
+    for (let maskX = 0; maskX < mask.width; maskX += 1) {
+      const x = originX + maskX;
+      if (x < 0 || x >= imageData.width) {
+        continue;
+      }
+
+      const maskAlpha = mask.alpha[maskY * mask.width + maskX];
+      if (maskAlpha === 0) {
+        continue;
+      }
+
+      blendSourceOver(imageData.data, (y * imageData.width + x) * 4, color, maskAlpha);
+    }
+  }
+}
+
+function blendSourceOver(data: Uint8ClampedArray, index: number, color: PaletteColor["rgba"], maskAlpha: number): void {
+  const sourceAlpha = (color[3] / 255) * (maskAlpha / 255);
+  const destinationAlpha = data[index + 3] / 255;
+  const outputAlpha = sourceAlpha + destinationAlpha * (1 - sourceAlpha);
+
+  if (outputAlpha <= 0) {
+    data[index] = 0;
+    data[index + 1] = 0;
+    data[index + 2] = 0;
+    data[index + 3] = 0;
+    return;
+  }
+
+  data[index] = Math.round((color[0] * sourceAlpha + data[index] * destinationAlpha * (1 - sourceAlpha)) / outputAlpha);
+  data[index + 1] = Math.round((color[1] * sourceAlpha + data[index + 1] * destinationAlpha * (1 - sourceAlpha)) / outputAlpha);
+  data[index + 2] = Math.round((color[2] * sourceAlpha + data[index + 2] * destinationAlpha * (1 - sourceAlpha)) / outputAlpha);
+  data[index + 3] = Math.round(outputAlpha * 255);
+}
+
+function getSessionSeed(session: DrawingSession, settings: ToolSettings, salt: number): number {
+  return hashStrokeSeed([session.startPoint], salt + settings.size * 31 + settings.brushSpacing * 7 + settings.brushScatter * 13);
 }
 
 function drawToneBucketPreview(context: CanvasRenderingContext2D, settings: ToolSettings): void {
@@ -614,8 +678,62 @@ function createTonePattern(
   return context.createPattern(patternCanvas as unknown as CanvasImageSource, "repeat");
 }
 
+function createTonePatternAlphaSampler(settings: ToolSettings): (projectX: number, projectY: number) => number {
+  const { base, size: patternSize } = parseTonePattern(settings.tonePattern);
+  const density = getToneDensityFactor(settings.toneDensity);
+
+  if (base === "dot") {
+    const spacing = Math.max(3, Math.round((patternSize === "large" ? 18 : patternSize === "medium" ? 12 : 8) - density * 5));
+    const radius = Math.max(1, (patternSize === "large" ? 5 : patternSize === "medium" ? 3 : 2) + density);
+    return (projectX, projectY) => {
+      const localX = positiveModulo(projectX, spacing);
+      const localY = positiveModulo(projectY, spacing);
+      const dx = localX - spacing / 2;
+      const dy = localY - spacing / 2;
+      const edge = radius - Math.sqrt(dx * dx + dy * dy);
+      if (!(settings.antialias ?? false)) {
+        return edge >= 0 ? 1 : 0;
+      }
+      return Math.max(0, Math.min(1, edge + 0.5));
+    };
+  }
+
+  if (base === "line") {
+    const spacing = Math.max(3, Math.round((patternSize === "large" ? 20 : patternSize === "medium" ? 14 : 9) - density * 6));
+    const lineWidth = Math.max(1, (patternSize === "large" ? 3 : patternSize === "medium" ? 2 : 1) + density);
+    return (projectX, projectY) => {
+      const diagonalPosition = positiveModulo(projectX - projectY, spacing);
+      const distance = Math.min(diagonalPosition, spacing - diagonalPosition);
+      const edge = lineWidth / 2 - distance;
+      if (!(settings.antialias ?? false)) {
+        return edge >= 0 ? 1 : 0;
+      }
+      return Math.max(0, Math.min(1, edge + 0.5));
+    };
+  }
+
+  const probability = Math.min(0.35, 0.1 + density * 0.22);
+  const noiseSize = patternSize === "large" ? 3 : patternSize === "medium" ? 2 : 1;
+  const seed = settings.toneDensity * 97 + (patternSize === "large" ? 37 : patternSize === "medium" ? 23 : 11);
+  return (projectX, projectY) => {
+    const cellX = Math.floor(projectX / noiseSize);
+    const cellY = Math.floor(projectY / noiseSize);
+    return hashGridNoise(cellX, cellY, seed) <= probability ? 1 : 0;
+  };
+}
+
 function getToneDensityFactor(density: number): number {
   return Math.min(1, Math.max(0, (density - 1) / 23));
+}
+
+function positiveModulo(value: number, divisor: number): number {
+  return ((value % divisor) + divisor) % divisor;
+}
+
+function hashGridNoise(x: number, y: number, seed: number): number {
+  let hash = (seed ^ Math.imul(x, 374761393) ^ Math.imul(y, 668265263)) >>> 0;
+  hash = Math.imul(hash ^ (hash >>> 13), 1274126177) >>> 0;
+  return ((hash ^ (hash >>> 16)) >>> 0) / 0xffffffff;
 }
 
 function strokePath(
@@ -1254,12 +1372,4 @@ function rgbaToCss(color: PaletteColor["rgba"]): string {
 
 function samePoint(a: Point | undefined, b: Point): boolean {
   return a !== undefined && a.x === b.x && a.y === b.y;
-}
-
-function seededRandom(seed: number): () => number {
-  let current = seed >>> 0;
-  return () => {
-    current = (current * 1664525 + 1013904223) >>> 0;
-    return current / 0xffffffff;
-  };
 }

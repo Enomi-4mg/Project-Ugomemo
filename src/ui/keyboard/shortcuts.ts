@@ -17,6 +17,7 @@ export type ShortcutAction =
   | "switchToPlaybackMode"
   | "switchToAudioMode"
   | "selectPen"
+  | "selectBrush"
   | "selectTone"
   | "selectEraser"
   | "selectShape"
@@ -45,9 +46,10 @@ const shortcutKeys: Record<ShortcutAction, string[]> = {
   switchToPlaybackMode: ["Ctrl", "3"],
   switchToAudioMode: ["Ctrl", "4"],
   selectPen: ["Q"],
-  selectTone: ["W"],
-  selectEraser: ["E"],
-  selectShape: ["R"],
+  selectBrush: ["W"],
+  selectTone: ["E"],
+  selectEraser: ["R"],
+  selectShape: ["T"],
   decreaseBrushSize: ["]"],
   increaseBrushSize: ["["],
   previousPage: ["Left"],
@@ -159,14 +161,17 @@ export function isShortcutAction(event: KeyboardLikeEvent, action: ShortcutActio
   if (action === "selectPen") {
     return isUnmodifiedKey(event, "q");
   }
-  if (action === "selectTone") {
+  if (action === "selectBrush") {
     return isUnmodifiedKey(event, "w");
   }
-  if (action === "selectEraser") {
+  if (action === "selectTone") {
     return isUnmodifiedKey(event, "e");
   }
-  if (action === "selectShape") {
+  if (action === "selectEraser") {
     return isUnmodifiedKey(event, "r");
+  }
+  if (action === "selectShape") {
+    return isUnmodifiedKey(event, "t");
   }
   if (action === "decreaseBrushSize") {
     return isUnmodifiedKey(event, "]");

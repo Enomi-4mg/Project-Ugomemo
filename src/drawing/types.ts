@@ -1,4 +1,4 @@
-export type Tool = "pen" | "tone" | "eraser" | "shape";
+export type Tool = "pen" | "brush" | "tone" | "eraser" | "shape";
 
 export type PaletteColor = {
   id: string;
