@@ -65,7 +65,16 @@ import {
 import { renderProject } from "../drawing/renderer";
 import { getCanvasPoint } from "../drawing/tools";
 import { drawingToolOrder, drawingToolRegistry, type DrawingSession, type DrawingToolId, type Point, type ToolSettings } from "../drawing/toolStrategies";
-import type { DrawingProject, Frame, Layer, PaletteColor, Tool } from "../drawing/types";
+import { builtInBrushPresets, type BrushPreset } from "../drawing/brush/presets";
+import {
+  brushTipDefinitions,
+  clearBrushTipMaskCaches,
+  registerCustomBrushTipDefinitions,
+  unregisterProjectBrushTipDefinitions,
+  type BrushTipDefinition,
+  type BrushTipId,
+} from "../drawing/brush/tips";
+import type { DrawingProject, Frame, Layer, PaletteColor, ProjectBrushAsset, Tool } from "../drawing/types";
 import {
   canUseTauri,
   cancelActiveExport,
@@ -76,9 +85,13 @@ import {
   exportVideoFromPngs,
   floodFillPixels,
   getDefaultProjectPackagePaths,
+  importCustomBrushTipWithNativeDialog,
+  loadCustomBrushPresets,
+  loadCustomBrushTips,
   loadProjectWithNativeDialog,
   renameFile,
   saveProjectToPath,
+  saveCustomBrushPresets,
   saveProjectWithNativeDialog,
   selectAudioFiles,
   validateAudioAssets,
@@ -87,6 +100,7 @@ import {
   type AudioWorkstationState,
   type PersistedAudioAsset,
   type PersistedAudioTrack,
+  type PersistedCustomBrushTip,
   type ProjectPackagePaths,
 } from "../tauri/projectCommands";
 import { IconButton } from "./components/IconButton";
@@ -156,8 +170,14 @@ function createDefaultToolSettings(tool: DrawingToolId = "pen"): ToolSettings {
     size: drawingToolRegistry[tool].defaultSize,
     toneDensity: drawingToolRegistry.tone.defaultSize,
     penShape: "round",
+    brushTipId: "round",
     brushSpacing: 25,
     brushScatter: 0,
+    rotationMode: "fixed",
+    rotationDegrees: 0,
+    rotationJitterDegrees: 0,
+    scaleJitter: 0,
+    smoothing: "inherit",
     shapeType: "line",
     toneMode: "pen",
     tonePattern: "dot-medium",
@@ -229,8 +249,14 @@ function normalizeSavedToolSettings(defaults: ToolSettings, saved: Partial<ToolS
     size: clampBrushSize(saved?.size ?? defaults.size),
     toneDensity: clampToneDensity(saved?.toneDensity ?? defaults.toneDensity),
     penShape: saved?.penShape === "square" ? "square" : "round",
+    brushTipId: isBrushTipId(saved?.brushTipId) ? saved.brushTipId : defaults.brushTipId,
     brushSpacing: clampToolPercent(saved?.brushSpacing ?? defaults.brushSpacing),
     brushScatter: clampToolPercent(saved?.brushScatter ?? defaults.brushScatter),
+    rotationMode: isBrushRotationMode(saved?.rotationMode) ? saved.rotationMode : defaults.rotationMode,
+    rotationDegrees: normalizeToolNumber(saved?.rotationDegrees ?? defaults.rotationDegrees, defaults.rotationDegrees),
+    rotationJitterDegrees: clampToolNumber(saved?.rotationJitterDegrees ?? defaults.rotationJitterDegrees, 0, 360),
+    scaleJitter: clampToolNumber(saved?.scaleJitter ?? defaults.scaleJitter, 0, 1),
+    smoothing: isBrushSmoothingMode(saved?.smoothing) ? saved.smoothing : defaults.smoothing,
     shapeType: saved?.shapeType === "ellipse" || saved?.shapeType === "triangle" || saved?.shapeType === "rectangle" ? saved.shapeType : defaults.shapeType,
     toneMode: saved?.toneMode === "bucket" ? "bucket" : "pen",
     tonePattern: isTonePattern(saved?.tonePattern) ? saved.tonePattern : defaults.tonePattern,
@@ -296,6 +322,9 @@ export function App() {
   const [mode, setMode] = useState<AppMode>("draw");
   const [tool, setTool] = useState<Tool>("pen");
   const [toolSettingsByTool, setToolSettingsByTool] = useState<Record<DrawingToolId, ToolSettings>>(() => loadSavedToolSettingsByTool());
+  const [customBrushTips, setCustomBrushTips] = useState<PersistedCustomBrushTip[]>([]);
+  const [customBrushPresets, setCustomBrushPresets] = useState<BrushPreset[]>([]);
+  const [selectedBrushPresetId, setSelectedBrushPresetId] = useState("");
   const [colorSlot, setColorSlot] = useState<0 | 1>(0);
   const [pendingShapeStep, setPendingShapeStep] = useState<PendingShapeStep | null>(null);
   const [status, setStatus] = useState("Ready");
@@ -392,6 +421,44 @@ export function App() {
     saveToolSettingsByTool(toolSettingsByTool);
   }, [toolSettingsByTool]);
 
+  useEffect(() => {
+    if (!canUseTauri()) {
+      return;
+    }
+
+    let isStale = false;
+    loadCustomBrushTips()
+      .then((tips) => {
+        if (isStale) {
+          return;
+        }
+        registerCustomBrushTipDefinitions(tips.map(customBrushTipToDefinition));
+        clearBrushTipMaskCaches();
+        setCustomBrushTips(tips);
+        reconcileMissingCustomBrushSelections(tips);
+        attachSelectedCustomBrushTips(tips);
+      })
+      .catch((error) => {
+        console.warn("Custom brush tips could not be loaded.", error);
+        setStatus("Custom brush tips could not be loaded.");
+      });
+
+    loadCustomBrushPresets()
+      .then((presets) => {
+        if (!isStale) {
+          setCustomBrushPresets(presets.map(normalizeBrushPreset));
+        }
+      })
+      .catch((error) => {
+        console.warn("Custom brush presets could not be loaded.", error);
+        setStatus("Custom brush presets could not be loaded.");
+      });
+
+    return () => {
+      isStale = true;
+    };
+  }, []);
+
   function adjustBrushSize(delta: number) {
     if (tool === "tone" && toolSettings.toneMode === "bucket") {
       return;
@@ -411,6 +478,169 @@ export function App() {
     };
   }
 
+  function reconcileMissingCustomBrushSelections(tips: PersistedCustomBrushTip[]) {
+    const customTipIds = new Set(tips.map((tip) => tip.id));
+    setToolSettingsByTool((current) =>
+      drawingToolOrder.reduce(
+        (nextSettings, toolId) => {
+          const settings = current[toolId];
+          nextSettings[toolId] =
+            typeof settings.brushTipId === "string" && settings.brushTipId.startsWith("custom:") && !customTipIds.has(settings.brushTipId)
+              ? { ...settings, brushTipId: "round" }
+              : settings;
+          return nextSettings;
+        },
+        {} as Record<DrawingToolId, ToolSettings>,
+      ),
+    );
+  }
+
+  function attachSelectedCustomBrushTips(tips: PersistedCustomBrushTip[]) {
+    const tipsById = new Map(tips.map((tip) => [tip.id, tip]));
+    const selectedAssets = Object.values(toolSettingsByTool)
+      .map((settings) => tipsById.get(settings.brushTipId))
+      .filter((tip): tip is PersistedCustomBrushTip => Boolean(tip))
+      .map(customBrushTipToProjectAsset);
+    if (selectedAssets.length === 0) {
+      return;
+    }
+    setProject((current) => {
+      const existingIds = new Set(current.brushAssets.map((asset) => asset.id));
+      const nextAssets = selectedAssets.filter((asset) => !existingIds.has(asset.id));
+      return nextAssets.length > 0 ? { ...current, brushAssets: [...current.brushAssets, ...nextAssets] } : current;
+    });
+  }
+
+  async function importBrushTip() {
+    if (!canUseTauri()) {
+      setStatus("Brush tip import is available in the desktop app.");
+      return;
+    }
+
+    try {
+      setStatus("Importing brush tip...");
+      const tip = await importCustomBrushTipWithNativeDialog();
+      if (!tip) {
+        setStatus("Brush tip import canceled.");
+        return;
+      }
+      registerCustomBrushTipDefinitions([customBrushTipToDefinition(tip)]);
+      clearBrushTipMaskCaches();
+      setCustomBrushTips((current) => [...current, tip]);
+      setToolSettings((current) => ({ ...current, brushTipId: tip.id as BrushTipId }));
+      attachBrushAssetToProject(customBrushTipToProjectAsset(tip));
+      setStatus(`Imported brush tip: ${tip.name}`);
+    } catch (error) {
+      console.error(error);
+      setStatus(error instanceof Error ? error.message : "Brush tip import failed.");
+    }
+  }
+
+  async function persistCustomBrushPresets(nextPresets: BrushPreset[]) {
+    setCustomBrushPresets(nextPresets);
+    try {
+      await saveCustomBrushPresets(nextPresets);
+    } catch (error) {
+      console.warn("Custom brush presets could not be saved.", error);
+      setStatus("Brush preset could not be saved.");
+    }
+  }
+
+  function saveCurrentBrushPreset() {
+    const presetName = window.prompt("Brush preset name", "Custom Brush");
+    if (!presetName?.trim()) {
+      return;
+    }
+    const preset = createBrushPresetFromSettings(presetName.trim(), toolSettings);
+    void persistCustomBrushPresets([...customBrushPresets, preset]).then(() => {
+      setStatus(`Saved brush preset: ${preset.name}`);
+    });
+  }
+
+  function selectBrushPreset(presetId: string) {
+    if (!presetId) {
+      setSelectedBrushPresetId("");
+      return;
+    }
+    const preset = [...builtInBrushPresets, ...customBrushPresets].find((candidate) => candidate.id === presetId);
+    if (!preset) {
+      setStatus("Brush preset is missing.");
+      return;
+    }
+    setSelectedBrushPresetId(presetId);
+    applyBrushPreset(preset);
+  }
+
+  function applyBrushPreset(preset: BrushPreset) {
+    const tipExists = isBrushTipId(preset.tipId) && preset.tipId in brushTipDefinitions;
+    if (!tipExists) {
+      console.warn(`Brush preset "${preset.id}" references missing tip "${preset.tipId}". Falling back to round.`);
+      setStatus(`Brush preset "${preset.name}" uses a missing tip. Falling back to Round.`);
+    }
+    const tipId = tipExists ? preset.tipId : "round";
+    setToolSettings((current) => ({
+      ...current,
+      brushTipId: tipId,
+      size: clampBrushSize(preset.size),
+      brushSpacing: clampToolPercent(preset.spacing * 100),
+      brushScatter: clampToolPercent(preset.scatter * 100),
+      rotationMode: isBrushRotationMode(preset.rotationMode) ? preset.rotationMode : "fixed",
+      rotationDegrees: normalizeToolNumber(preset.rotationDegrees, 0),
+      rotationJitterDegrees: clampToolNumber(preset.rotationJitterDegrees, 0, 360),
+      scaleJitter: clampToolNumber(preset.scaleJitter, 0, 1),
+      smoothing: isBrushSmoothingMode(preset.smoothing) ? preset.smoothing : "inherit",
+    }));
+    if (tipId !== "round") {
+      selectBrushTip(tipId);
+    }
+    setStatus(`Selected brush preset: ${preset.name}`);
+  }
+
+  function renameBrushPreset(presetId: string) {
+    const preset = customBrushPresets.find((candidate) => candidate.id === presetId);
+    if (!preset) {
+      return;
+    }
+    const nextName = window.prompt("Brush preset name", preset.name);
+    if (!nextName?.trim()) {
+      return;
+    }
+    void persistCustomBrushPresets(customBrushPresets.map((candidate) => (candidate.id === presetId ? { ...candidate, name: nextName.trim() } : candidate)));
+    setStatus(`Renamed brush preset: ${nextName.trim()}`);
+  }
+
+  function deleteBrushPreset(presetId: string) {
+    if (!customBrushPresets.some((preset) => preset.id === presetId) || !window.confirm("Delete this custom brush preset?")) {
+      return;
+    }
+    void persistCustomBrushPresets(customBrushPresets.filter((preset) => preset.id !== presetId));
+    setSelectedBrushPresetId("");
+    setStatus("Deleted brush preset.");
+  }
+
+  function selectBrushTip(brushTipId: BrushTipId) {
+    setToolSettings((current) => ({ ...current, brushTipId }));
+    const customTip = customBrushTips.find((tip) => tip.id === brushTipId);
+    if (customTip) {
+      attachBrushAssetToProject(customBrushTipToProjectAsset(customTip));
+    }
+  }
+
+  function attachBrushAssetToProject(asset: ProjectBrushAsset) {
+    setProject((current) => {
+      if (current.brushAssets.some((candidate) => candidate.id === asset.id)) {
+        return current;
+      }
+      const nextProject = {
+        ...current,
+        brushAssets: [...current.brushAssets, asset],
+      };
+      setHistory((historyCurrent) => pushHistory(historyCurrent, nextProject));
+      setHasUnsavedChanges(true);
+      return nextProject;
+    });
+  }
+
   function isTwoStepShape(settings: ToolSettings): settings is ToolSettings & { shapeType: "triangle" | "ellipse" | "rectangle" } {
     return tool === "shape" && (settings.shapeType === "triangle" || settings.shapeType === "ellipse" || settings.shapeType === "rectangle");
   }
@@ -428,14 +658,14 @@ export function App() {
     }
   }
 
-  function finishShapeSession(session: DrawingSession, point: Point, settings: ToolSettings, pointerId?: number) {
+  async function finishShapeSession(session: DrawingSession, point: Point, settings: ToolSettings, pointerId?: number) {
     const canvas = canvasRef.current;
     if (!canvas) {
       return;
     }
 
     const currentProject = projectRef.current ?? project;
-    const nextImageData = drawingToolRegistry[session.toolId].finalizeStroke(session, point, settings);
+    const nextImageData = await drawingToolRegistry[session.toolId].finalizeStroke(session, point, settings);
     const nextProject = replaceCurrentLayers(
       currentProject,
       getCurrentLayers(currentProject).map((layer) =>
@@ -474,7 +704,35 @@ export function App() {
       return;
     }
 
-    drawingToolRegistry[tool as DrawingToolId].drawPreview(context, toolSettings);
+    const previewCanvas = document.createElement("canvas");
+    previewCanvas.width = canvas.width;
+    previewCanvas.height = canvas.height;
+    const previewContext = previewCanvas.getContext("2d", { willReadFrequently: true });
+    if (!previewContext) {
+      return;
+    }
+
+    let isStale = false;
+    void drawingToolRegistry[tool as DrawingToolId]
+      .drawPreview(previewContext, toolSettings)
+      .then(() => {
+        if (isStale) {
+          return;
+        }
+        context.setTransform(1, 0, 0, 1, 0, 0);
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(previewCanvas, 0, 0);
+      })
+      .catch((error) => {
+        if (isStale) {
+          return;
+        }
+        console.warn("Tool preview could not be rendered.", error);
+        void drawingToolRegistry.pen.drawPreview(context, { ...toolSettings, penShape: "round", brushTipId: "round" });
+      });
+    return () => {
+      isStale = true;
+    };
   }, [tool, toolSettings]);
 
   useEffect(() => {
@@ -1155,7 +1413,7 @@ export function App() {
     if (pendingShapeSession) {
       const currentProject = projectRef.current ?? project;
       const point = getCanvasPoint(canvas, event, currentProject);
-      finishShapeSession(pendingShapeSession, point, effectiveSettings);
+      await finishShapeSession(pendingShapeSession, point, effectiveSettings);
       pendingShapeSessionRef.current = null;
       setPendingShapeStep(null);
       return;
@@ -1186,7 +1444,7 @@ export function App() {
     });
 
     if (tool === "tone" && session.settings.toneMode === "bucket") {
-      const nextImageData = drawingTool.finalizeStroke(session, point, session.settings);
+      const nextImageData = await drawingTool.finalizeStroke(session, point, session.settings);
       const nextProject = replaceCurrentLayers(
         activeProject,
         getCurrentLayers(activeProject).map((layer) =>
@@ -1204,10 +1462,10 @@ export function App() {
 
     drawingSessionRef.current = session;
     isDrawingRef.current = true;
-    drawingTool.updateStroke(session, point, session.settings);
+    await drawingTool.updateStroke(session, point, session.settings);
   }
 
-  function handlePointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
+  async function handlePointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
     const canvas = canvasRef.current;
     if (!canvas || mode !== "draw") {
       return;
@@ -1219,17 +1477,17 @@ export function App() {
       if (pendingShapeSession) {
         const currentProject = projectRef.current ?? project;
         const point = getCanvasPoint(canvas, event, currentProject);
-        drawingToolRegistry[pendingShapeSession.toolId].updateStroke(pendingShapeSession, point, getEffectiveToolSettings(event));
+        await drawingToolRegistry[pendingShapeSession.toolId].updateStroke(pendingShapeSession, point, getEffectiveToolSettings(event));
       }
       return;
     }
 
     const currentProject = projectRef.current ?? project;
     const point = getCanvasPoint(canvas, event, currentProject);
-    drawingToolRegistry[session.toolId].updateStroke(session, point, getEffectiveToolSettings(event));
+    await drawingToolRegistry[session.toolId].updateStroke(session, point, getEffectiveToolSettings(event));
   }
 
-  function handlePointerUp(event: React.PointerEvent<HTMLCanvasElement>) {
+  async function handlePointerUp(event: React.PointerEvent<HTMLCanvasElement>) {
     const session = drawingSessionRef.current;
     const canvas = canvasRef.current;
 
@@ -1239,7 +1497,7 @@ export function App() {
       const effectiveSettings = getEffectiveToolSettings(event);
 
       if (session.toolId === "shape" && session.shapePhase === "axis" && isTwoStepShape(effectiveSettings)) {
-        drawingToolRegistry[session.toolId].updateStroke(session, point, effectiveSettings);
+        await drawingToolRegistry[session.toolId].updateStroke(session, point, effectiveSettings);
         session.shapePhase = "width";
         session.shapeCrossPoint = point;
         pendingShapeSessionRef.current = session;
@@ -1252,7 +1510,7 @@ export function App() {
         return;
       }
 
-      finishShapeSession(session, point, effectiveSettings, event.pointerId);
+      await finishShapeSession(session, point, effectiveSettings, event.pointerId);
     }
 
     isDrawingRef.current = false;
@@ -1397,6 +1655,8 @@ export function App() {
 
   function createNewProject() {
     const nextProject = createFreshProjectKeepingPalette(project);
+    unregisterProjectBrushTipDefinitions();
+    clearBrushTipMaskCaches();
     setProject(nextProject);
     setHistory(createHistory(nextProject));
     setHasUnsavedChanges(false);
@@ -1504,6 +1764,9 @@ export function App() {
         return;
       }
 
+      unregisterProjectBrushTipDefinitions();
+      registerCustomBrushTipDefinitions(loaded.project.brushAssets.map(projectBrushAssetToDefinition));
+      clearBrushTipMaskCaches();
       setProject(loaded.project);
       setHistory(createHistory(loaded.project));
       setProjectName(loaded.projectName);
@@ -2939,6 +3202,66 @@ export function App() {
             {tool === "brush" && (
               <>
                 <label>
+                  Brush Preset
+                  <select
+                    value={selectedBrushPresetId}
+                    onChange={(event) => selectBrushPreset(event.target.value)}
+                  >
+                    <option value="">Select preset...</option>
+                    {builtInBrushPresets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.name}
+                      </option>
+                    ))}
+                    {customBrushPresets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="brush-preset-actions">
+                  <IconButton className="tool-button" icon={CopyPlus} label="Save Brush Preset" onClick={saveCurrentBrushPreset} />
+                  {customBrushPresets.length > 0 && (
+                    <>
+                      <IconButton
+                        className="tool-button"
+                        icon={FilePenLine}
+                        label="Rename Brush Preset"
+                        onClick={() => renameBrushPreset(selectedBrushPresetId)}
+                      />
+                      <IconButton
+                        className="tool-button"
+                        icon={Trash2}
+                        label="Delete Brush Preset"
+                        onClick={() => deleteBrushPreset(selectedBrushPresetId)}
+                      />
+                    </>
+                  )}
+                </div>
+                <label>
+                  Brush Tip
+                  <select
+                    title="Brush-only tip shape. Bitmap tips use PNG alpha as the mask."
+                    value={toolSettings.brushTipId}
+                    onChange={(event) => selectBrushTip(event.target.value as BrushTipId)}
+                  >
+                    {Object.values(brushTipDefinitions).map((definition) => (
+                      <option key={definition.id} value={definition.id}>
+                        {definition.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <IconButton
+                  className="tool-button"
+                  icon={Upload}
+                  label="Import PNG Brush Tip"
+                  onClick={() => {
+                    void importBrushTip();
+                  }}
+                />
+                <label>
                   Spacing %
                   <input
                     min="1"
@@ -2958,12 +3281,66 @@ export function App() {
                     onChange={(event) => setToolSettings((current) => ({ ...current, brushScatter: clampToolPercent(Number(event.target.value)) }))}
                   />
                 </label>
+                <label>
+                  Rotation
+                  <select
+                    value={toolSettings.rotationMode}
+                    onChange={(event) => setToolSettings((current) => ({ ...current, rotationMode: event.target.value as ToolSettings["rotationMode"] }))}
+                  >
+                    <option value="fixed">Fixed</option>
+                    <option value="stroke-direction">Stroke direction</option>
+                    <option value="random">Random</option>
+                  </select>
+                </label>
+                <label>
+                  Rotation Degrees
+                  <input
+                    type="number"
+                    step={1}
+                    value={toolSettings.rotationDegrees}
+                    onChange={(event) => setToolSettings((current) => ({ ...current, rotationDegrees: normalizeToolNumber(Number(event.target.value), 0) }))}
+                  />
+                </label>
+                <label>
+                  Rotation Jitter
+                  <input
+                    min="0"
+                    max="360"
+                    type="range"
+                    value={toolSettings.rotationJitterDegrees}
+                    onChange={(event) =>
+                      setToolSettings((current) => ({ ...current, rotationJitterDegrees: clampToolNumber(Number(event.target.value), 0, 360) }))
+                    }
+                  />
+                </label>
+                <label>
+                  Scale Jitter
+                  <input
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    type="range"
+                    value={toolSettings.scaleJitter}
+                    onChange={(event) => setToolSettings((current) => ({ ...current, scaleJitter: clampToolNumber(Number(event.target.value), 0, 1) }))}
+                  />
+                </label>
+                <label>
+                  Brush Smoothing
+                  <select
+                    value={toolSettings.smoothing}
+                    onChange={(event) => setToolSettings((current) => ({ ...current, smoothing: event.target.value as ToolSettings["smoothing"] }))}
+                  >
+                    <option value="inherit">Inherit antialias</option>
+                    <option value="nearest">Nearest</option>
+                    <option value="smooth">Smooth</option>
+                  </select>
+                </label>
               </>
             )}
           </>
         )}
 
-        {(tool === "pen" || tool === "brush" || tool === "eraser" || tool === "shape" || (tool === "tone" && toolSettings.toneMode === "pen")) && (
+        {(tool === "pen" || tool === "eraser" || tool === "shape" || (tool === "tone" && toolSettings.toneMode === "pen")) && (
           <label>
             Stroke Shape
             <select
@@ -4364,6 +4741,15 @@ function clampToolPercent(value: number): number {
   return Math.min(300, Math.max(0, Math.round(Number.isFinite(value) ? value : 0)));
 }
 
+function normalizeToolNumber(value: number, fallback: number): number {
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function clampToolNumber(value: number, min: number, max: number): number {
+  const safeValue = Number.isFinite(value) ? value : min;
+  return Math.min(max, Math.max(min, safeValue));
+}
+
 function clampToneDensity(value: number): number {
   return Math.min(24, Math.max(1, Math.round(Number.isFinite(value) ? value : 1)));
 }
@@ -4380,6 +4766,97 @@ function isTonePattern(value: unknown): value is ToolSettings["tonePattern"] {
     value === "noise-medium" ||
     value === "noise-large"
   );
+}
+
+function isBrushTipId(value: unknown): value is BrushTipId {
+  return typeof value === "string" && (value in brushTipDefinitions || value.startsWith("custom:") || value.startsWith("project:"));
+}
+
+function customBrushTipToDefinition(tip: PersistedCustomBrushTip): BrushTipDefinition {
+  return {
+    id: tip.id as BrushTipId,
+    name: tip.name,
+    kind: "bitmap",
+    sourceType: "custom",
+    source: canUseTauri() ? convertFileSrc(tip.storedFilePath) : tip.storedFilePath,
+    storedFilePath: tip.storedFilePath,
+    importedAt: tip.importedAt,
+    maskSourceMode: tip.maskSourceMode ?? "alpha",
+  };
+}
+
+function customBrushTipToProjectAsset(tip: PersistedCustomBrushTip): ProjectBrushAsset {
+  return {
+    id: tip.id,
+    name: tip.name,
+    kind: "bitmap",
+    source: "app",
+    storedFilePath: tip.storedFilePath,
+    maskSourceMode: tip.maskSourceMode ?? "alpha",
+    smoothing: "inherit",
+  };
+}
+
+function projectBrushAssetToDefinition(asset: ProjectBrushAsset): BrushTipDefinition {
+  return {
+    id: asset.id as BrushTipId,
+    name: asset.name,
+    kind: "bitmap",
+    sourceType: "project",
+    source: asset.storedFilePath ? (canUseTauri() ? convertFileSrc(asset.storedFilePath) : asset.storedFilePath) : "",
+    storedFilePath: asset.storedFilePath,
+    importedAt: undefined,
+    maskSourceMode: asset.maskSourceMode ?? "alpha",
+  };
+}
+
+function createBrushPresetFromSettings(name: string, settings: ToolSettings): BrushPreset {
+  const tipDefinition = brushTipDefinitions[settings.brushTipId];
+  return {
+    id: `preset:custom:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    tipId: settings.brushTipId,
+    size: settings.size,
+    spacing: clampToolPercent(settings.brushSpacing) / 100,
+    scatter: clampToolPercent(settings.brushScatter) / 100,
+    rotationMode: settings.rotationMode,
+    rotationDegrees: settings.rotationDegrees,
+    rotationJitterDegrees: settings.rotationJitterDegrees,
+    scaleJitter: settings.scaleJitter,
+    smoothing: settings.smoothing,
+    maskSourceMode: tipDefinition?.kind === "bitmap" ? (tipDefinition.maskSourceMode ?? "alpha") : "alpha",
+    source: "custom",
+  };
+}
+
+function normalizeBrushPreset(preset: BrushPreset): BrushPreset {
+  return {
+    id: typeof preset.id === "string" && preset.id ? preset.id : `preset:custom:${Date.now().toString(36)}`,
+    name: typeof preset.name === "string" && preset.name ? preset.name : "Custom Brush",
+    tipId: typeof preset.tipId === "string" ? preset.tipId : "round",
+    size: clampBrushSize(preset.size),
+    spacing: clampToolNumber(preset.spacing, 0, 3),
+    scatter: clampToolNumber(preset.scatter, 0, 3),
+    rotationMode: isBrushRotationMode(preset.rotationMode) ? preset.rotationMode : "fixed",
+    rotationDegrees: normalizeToolNumber(preset.rotationDegrees, 0),
+    rotationJitterDegrees: clampToolNumber(preset.rotationJitterDegrees, 0, 360),
+    scaleJitter: clampToolNumber(preset.scaleJitter, 0, 1),
+    smoothing: isBrushSmoothingMode(preset.smoothing) ? preset.smoothing : "inherit",
+    maskSourceMode: isBrushTipMaskSourceMode(preset.maskSourceMode) ? preset.maskSourceMode : "alpha",
+    source: preset.source === "project" || preset.source === "built-in" ? preset.source : "custom",
+  };
+}
+
+function isBrushRotationMode(value: unknown): value is ToolSettings["rotationMode"] {
+  return value === "fixed" || value === "stroke-direction" || value === "random";
+}
+
+function isBrushSmoothingMode(value: unknown): value is ToolSettings["smoothing"] {
+  return value === "inherit" || value === "nearest" || value === "smooth";
+}
+
+function isBrushTipMaskSourceMode(value: unknown): value is BrushPreset["maskSourceMode"] {
+  return value === "alpha" || value === "luminance" || value === "inverted-luminance" || value === "alpha-luminance" || value === "alpha-inverted-luminance";
 }
 
 function getToolShortcut(toolId: DrawingToolId, platform: Platform): string {
@@ -4697,7 +5174,7 @@ function sanitizeProjectName(projectName: string): string {
   const safeName = projectName
     .trim()
     .replace(/\.[Uu][Pp][Jj]$/, "")
-    .replace(/[^a-zA-Z0-9_-]+/g, "_")
+    .replace(/[^\p{L}\p{N}_-]+/gu, "_")
     .replace(/^_+|_+$/g, "");
 
   return safeName || "untitled_project";
