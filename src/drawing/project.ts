@@ -32,6 +32,7 @@ export function createProject(width = 320, height = 240): DrawingProject {
       panX: 0,
       panY: 0,
     },
+    brushAssets: [],
   };
 }
 

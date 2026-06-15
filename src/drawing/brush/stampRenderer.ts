@@ -1,18 +1,67 @@
 import type { StampRenderOptions, StampColor } from "./types";
 
 export function renderStamps(options: StampRenderOptions): void {
-  const { context, stamps, mask, color, patternAlphaAt } = options;
+  const { context, stamps, masks, color, patternAlphaAt } = options;
   if (stamps.length === 0) {
     return;
   }
 
-  const imageData = context.getImageData(0, 0, context.canvas.width, context.canvas.height);
-
-  for (const stamp of stamps) {
-    stampMask(imageData, mask, stamp.x, stamp.y, color, patternAlphaAt);
+  const bounds = getStampBounds(stamps, masks, context.canvas.width, context.canvas.height);
+  if (!bounds) {
+    return;
   }
 
-  context.putImageData(imageData, 0, 0);
+  const imageData = context.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
+
+  for (let index = 0; index < stamps.length; index += 1) {
+    const stamp = stamps[index];
+    const mask = masks[index];
+    if (!mask) {
+      continue;
+    }
+    stampMask(imageData, mask, stamp.x - bounds.x, stamp.y - bounds.y, color, patternAlphaAt, bounds.x, bounds.y);
+  }
+
+  context.putImageData(imageData, bounds.x, bounds.y);
+}
+
+function getStampBounds(
+  stamps: StampRenderOptions["stamps"],
+  masks: StampRenderOptions["masks"],
+  canvasWidth: number,
+  canvasHeight: number,
+): { x: number; y: number; width: number; height: number } | null {
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  for (let index = 0; index < stamps.length; index += 1) {
+    const stamp = stamps[index];
+    const mask = masks[index];
+    if (!mask) {
+      continue;
+    }
+    const originX = Math.round(stamp.x) - Math.floor(mask.width / 2);
+    const originY = Math.round(stamp.y) - Math.floor(mask.height / 2);
+    minX = Math.min(minX, originX);
+    minY = Math.min(minY, originY);
+    maxX = Math.max(maxX, originX + mask.width);
+    maxY = Math.max(maxY, originY + mask.height);
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+    return null;
+  }
+
+  const x = Math.max(0, Math.floor(minX));
+  const y = Math.max(0, Math.floor(minY));
+  const right = Math.min(canvasWidth, Math.ceil(maxX));
+  const bottom = Math.min(canvasHeight, Math.ceil(maxY));
+  if (right <= x || bottom <= y) {
+    return null;
+  }
+  return { x, y, width: right - x, height: bottom - y };
 }
 
 function stampMask(
@@ -22,6 +71,8 @@ function stampMask(
   centerY: number,
   color: StampColor,
   patternAlphaAt?: (projectX: number, projectY: number) => number,
+  projectOffsetX = 0,
+  projectOffsetY = 0,
 ): void {
   const originX = Math.round(centerX) - Math.floor(mask.width / 2);
   const originY = Math.round(centerY) - Math.floor(mask.height / 2);
@@ -43,7 +94,7 @@ function stampMask(
         continue;
       }
 
-      const patternAlpha = patternAlphaAt ? patternAlphaAt(x, y) : 1;
+      const patternAlpha = patternAlphaAt ? patternAlphaAt(projectOffsetX + x, projectOffsetY + y) : 1;
       const finalAlpha = Math.round(shapeAlpha * Math.max(0, Math.min(1, patternAlpha)) * 255);
       if (finalAlpha <= 0) {
         continue;

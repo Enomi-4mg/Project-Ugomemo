@@ -1,6 +1,13 @@
 import type { StampMask } from "../../../strokeShapes";
+import { imageDataToStampMask, normalizeBrushTipMaskSourceMode } from "./imageDataToStampMask";
+import type { BrushTipMaskSourceMode } from "../../tips/types";
 
-export async function loadBitmapStamp(source: string): Promise<StampMask> {
+export async function loadBitmapStamp(
+  source: string,
+  options: {
+    maskSourceMode?: BrushTipMaskSourceMode;
+  } = {},
+): Promise<StampMask> {
   const image = await loadImage(source);
   const canvas = document.createElement("canvas");
   canvas.width = image.width;
@@ -13,13 +20,7 @@ export async function loadBitmapStamp(source: string): Promise<StampMask> {
 
   context.drawImage(image, 0, 0);
   const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-  const alpha = new Uint8ClampedArray(canvas.width * canvas.height);
-
-  for (let index = 0; index < alpha.length; index += 1) {
-    alpha[index] = pixels.data[index * 4 + 3];
-  }
-
-  return { width: canvas.width, height: canvas.height, alpha };
+  return imageDataToStampMask(pixels, normalizeBrushTipMaskSourceMode(options.maskSourceMode));
 }
 
 function loadImage(source: string): Promise<HTMLImageElement> {

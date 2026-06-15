@@ -2,6 +2,8 @@ import { getFitCamera } from "./renderer";
 import { cloneImageData } from "./project";
 import { renderBrushStroke } from "./brush/engine";
 import { hashStrokeSeed, seededRandom } from "./brush/seededRandom";
+import type { BrushRotationMode, BrushSmoothingMode } from "./brush/types";
+import type { BrushTipId } from "./brush/tips";
 import { getStrokeShapeDefinition, type StampMask, type StrokeShapeId } from "./strokeShapes";
 import type { Camera, DrawingProject, Layer, PaletteColor, Tool } from "./types";
 import { parseTonePattern, type TonePattern } from "../ui/tone/tonePattern";
@@ -16,8 +18,14 @@ export type ToolSettings = {
   size: number;
   toneDensity: number;
   penShape: PenShape;
+  brushTipId: BrushTipId;
   brushSpacing: number;
   brushScatter: number;
+  rotationMode: BrushRotationMode;
+  rotationDegrees: number;
+  rotationJitterDegrees: number;
+  scaleJitter: number;
+  smoothing: BrushSmoothingMode;
   shapeType: ShapeType;
   toneMode: ToneMode;
   tonePattern: TonePattern;
@@ -67,9 +75,9 @@ export interface DrawingTool {
     point: Point;
     settings: ToolSettings;
   }): DrawingSession;
-  updateStroke(session: DrawingSession, point: Point, settings: ToolSettings): void;
-  finalizeStroke(session: DrawingSession, point: Point, settings: ToolSettings): ImageData;
-  drawPreview(context: CanvasRenderingContext2D, settings: ToolSettings): void;
+  updateStroke(session: DrawingSession, point: Point, settings: ToolSettings): Promise<void>;
+  finalizeStroke(session: DrawingSession, point: Point, settings: ToolSettings): Promise<ImageData>;
+  drawPreview(context: CanvasRenderingContext2D, settings: ToolSettings): Promise<void>;
 }
 
 abstract class BaseDrawingTool implements DrawingTool {
@@ -110,8 +118,14 @@ abstract class BaseDrawingTool implements DrawingTool {
         size: args.settings.size,
         toneDensity: args.settings.toneDensity,
         penShape: args.settings.penShape,
+        brushTipId: args.settings.brushTipId,
         brushSpacing: args.settings.brushSpacing,
         brushScatter: args.settings.brushScatter,
+        rotationMode: args.settings.rotationMode,
+        rotationDegrees: args.settings.rotationDegrees,
+        rotationJitterDegrees: args.settings.rotationJitterDegrees,
+        scaleJitter: args.settings.scaleJitter,
+        smoothing: args.settings.smoothing,
         shapeType: args.settings.shapeType,
         toneMode: args.settings.toneMode,
         tonePattern: args.settings.tonePattern,
@@ -132,7 +146,7 @@ abstract class BaseDrawingTool implements DrawingTool {
     };
   }
 
-  updateStroke(session: DrawingSession, point: Point, settings: ToolSettings): void {
+  async updateStroke(session: DrawingSession, point: Point, settings: ToolSettings): Promise<void> {
     session.settings = cloneToolSettings(settings);
     if (session.points.length === 0 || !samePoint(session.points[session.points.length - 1], point)) {
       session.points.push(point);
@@ -140,19 +154,19 @@ abstract class BaseDrawingTool implements DrawingTool {
 
     session.lastPoint = point;
     this.restoreLayerSnapshot(session);
-    this.paintStroke(session, settings);
+    await this.paintStroke(session, settings);
     this.restoreMainSnapshot(session);
     this.compositeLayerOnMain(session);
   }
 
-  finalizeStroke(session: DrawingSession, point: Point, settings: ToolSettings): ImageData {
-    this.updateStroke(session, point, settings);
+  async finalizeStroke(session: DrawingSession, point: Point, settings: ToolSettings): Promise<ImageData> {
+    await this.updateStroke(session, point, settings);
     return session.layerContext.getImageData(0, 0, session.projectWidth, session.projectHeight);
   }
 
-  abstract drawPreview(context: CanvasRenderingContext2D, settings: ToolSettings): void;
+  abstract drawPreview(context: CanvasRenderingContext2D, settings: ToolSettings): Promise<void>;
 
-  protected abstract paintStroke(session: DrawingSession, settings: ToolSettings): void;
+  protected abstract paintStroke(session: DrawingSession, settings: ToolSettings): void | Promise<void>;
 
   protected restoreLayerSnapshot(session: DrawingSession): void {
     session.layerContext.setTransform(1, 0, 0, 1, 0, 0);
@@ -188,7 +202,7 @@ class PenTool extends BaseDrawingTool {
     drawPenStroke(session.layerContext, session.points, settings);
   }
 
-  drawPreview(context: CanvasRenderingContext2D, settings: ToolSettings): void {
+  async drawPreview(context: CanvasRenderingContext2D, settings: ToolSettings): Promise<void> {
     drawPreviewSurface(context);
     drawPenStroke(
       context,
@@ -209,23 +223,28 @@ class BrushTool extends BaseDrawingTool {
   readonly label = "Brush";
   readonly defaultSize = 16;
 
-  protected paintStroke(session: DrawingSession, settings: ToolSettings): void {
-    renderBrushStroke({
+  protected async paintStroke(session: DrawingSession, settings: ToolSettings): Promise<void> {
+    await renderBrushStroke({
       context: session.layerContext,
       points: session.points,
       color: settings.color,
       size: settings.size,
       spacingPercent: settings.brushSpacing,
       scatterPercent: settings.brushScatter,
-      stampShape: settings.penShape,
+      brushTipId: settings.brushTipId,
       antiAlias: settings.antialias ?? false,
+      rotationMode: settings.rotationMode,
+      rotationDegrees: settings.rotationDegrees,
+      rotationJitterDegrees: settings.rotationJitterDegrees,
+      scaleJitter: settings.scaleJitter,
+      smoothing: settings.smoothing,
       seed: getSessionSeed(session, settings, 17),
     });
   }
 
-  drawPreview(context: CanvasRenderingContext2D, settings: ToolSettings): void {
+  async drawPreview(context: CanvasRenderingContext2D, settings: ToolSettings): Promise<void> {
     drawPreviewSurface(context);
-    renderBrushStroke({
+    await renderBrushStroke({
       context,
       points: [
         { x: 20, y: 72 },
@@ -237,8 +256,13 @@ class BrushTool extends BaseDrawingTool {
       size: settings.size,
       spacingPercent: settings.brushSpacing,
       scatterPercent: settings.brushScatter,
-      stampShape: settings.penShape,
+      brushTipId: settings.brushTipId,
       antiAlias: settings.antialias ?? false,
+      rotationMode: settings.rotationMode,
+      rotationDegrees: settings.rotationDegrees,
+      rotationJitterDegrees: settings.rotationJitterDegrees,
+      scaleJitter: settings.scaleJitter,
+      smoothing: settings.smoothing,
       seed: hashStrokeSeed([{ x: 20, y: 72 }], 17),
     });
   }
@@ -258,7 +282,7 @@ class ToneTool extends BaseDrawingTool {
     return session;
   }
 
-  updateStroke(session: DrawingSession, point: Point, settings: ToolSettings): void {
+  async updateStroke(session: DrawingSession, point: Point, settings: ToolSettings): Promise<void> {
     if (settings.toneMode === "bucket") {
       return;
     }
@@ -269,12 +293,12 @@ class ToneTool extends BaseDrawingTool {
 
     session.lastPoint = point;
     this.restoreLayerSnapshot(session);
-    this.paintStroke(session, settings);
+    await this.paintStroke(session, settings);
     this.restoreMainSnapshot(session);
     this.compositeLayerOnMain(session);
   }
 
-  finalizeStroke(session: DrawingSession, point: Point, settings: ToolSettings): ImageData {
+  async finalizeStroke(session: DrawingSession, point: Point, settings: ToolSettings): Promise<ImageData> {
     if (settings.toneMode === "bucket" && !session.committed) {
       this.applyToneFill(session, point, settings);
       session.committed = true;
@@ -283,26 +307,26 @@ class ToneTool extends BaseDrawingTool {
     return session.layerContext.getImageData(0, 0, session.projectWidth, session.projectHeight);
   }
 
-  protected paintStroke(session: DrawingSession, settings: ToolSettings): void {
+  protected async paintStroke(session: DrawingSession, settings: ToolSettings): Promise<void> {
     if (settings.toneMode !== "pen") {
       return;
     }
 
-    renderBrushStroke({
+    await renderBrushStroke({
       context: session.layerContext,
       points: session.points,
       color: settings.color,
       size: settings.size,
       spacingPercent: 25,
       scatterPercent: 0,
-      stampShape: settings.penShape,
+      brushTipId: settings.penShape,
       antiAlias: settings.antialias ?? false,
       seed: getSessionSeed(session, settings, 29),
       patternAlphaAt: createTonePatternAlphaSampler(settings),
     });
   }
 
-  drawPreview(context: CanvasRenderingContext2D, settings: ToolSettings): void {
+  async drawPreview(context: CanvasRenderingContext2D, settings: ToolSettings): Promise<void> {
     drawPreviewSurface(context);
 
     if (settings.toneMode === "bucket") {
@@ -310,7 +334,7 @@ class ToneTool extends BaseDrawingTool {
       return;
     }
 
-    renderBrushStroke({
+    await renderBrushStroke({
       context,
       points: [
         { x: 16, y: 26 },
@@ -323,7 +347,7 @@ class ToneTool extends BaseDrawingTool {
       size: settings.size,
       spacingPercent: 25,
       scatterPercent: 0,
-      stampShape: settings.penShape,
+      brushTipId: settings.penShape,
       antiAlias: settings.antialias ?? false,
       seed: hashStrokeSeed([{ x: 16, y: 26 }], 29),
       patternAlphaAt: createTonePatternAlphaSampler(settings),
@@ -396,14 +420,14 @@ class EraserTool extends BaseDrawingTool {
     return session;
   }
 
-  updateStroke(session: DrawingSession, point: Point, settings: ToolSettings): void {
+  async updateStroke(session: DrawingSession, point: Point, settings: ToolSettings): Promise<void> {
     if (session.points.length === 0 || !samePoint(session.points[session.points.length - 1], point)) {
       session.points.push(point);
     }
 
     session.lastPoint = point;
     this.restoreLayerSnapshot(session);
-    this.paintStroke(session, settings);
+    await this.paintStroke(session, settings);
     this.restoreMainSnapshot(session);
     this.compositeLayerOnMain(session);
   }
@@ -413,7 +437,7 @@ class EraserTool extends BaseDrawingTool {
     erasePath(session.layerContext, session.points, settings);
   }
 
-  drawPreview(context: CanvasRenderingContext2D, settings: ToolSettings): void {
+  async drawPreview(context: CanvasRenderingContext2D, settings: ToolSettings): Promise<void> {
     drawPreviewSurface(context);
     context.save();
     context.fillStyle = "#111111";
@@ -448,7 +472,7 @@ class ShapeTool extends BaseDrawingTool {
     drawShape(session.layerContext, session.startPoint, session.lastPoint, settings);
   }
 
-  updateStroke(session: DrawingSession, point: Point, settings: ToolSettings): void {
+  async updateStroke(session: DrawingSession, point: Point, settings: ToolSettings): Promise<void> {
     session.settings = cloneToolSettings(settings);
     if (session.shapePhase === "width") {
       session.shapeCrossPoint = point;
@@ -459,15 +483,15 @@ class ShapeTool extends BaseDrawingTool {
       return;
     }
 
-    super.updateStroke(session, point, settings);
+    await super.updateStroke(session, point, settings);
   }
 
-  finalizeStroke(session: DrawingSession, point: Point, settings: ToolSettings): ImageData {
-    this.updateStroke(session, point, settings);
+  async finalizeStroke(session: DrawingSession, point: Point, settings: ToolSettings): Promise<ImageData> {
+    await this.updateStroke(session, point, settings);
     return session.layerContext.getImageData(0, 0, session.projectWidth, session.projectHeight);
   }
 
-  drawPreview(context: CanvasRenderingContext2D, settings: ToolSettings): void {
+  async drawPreview(context: CanvasRenderingContext2D, settings: ToolSettings): Promise<void> {
     drawPreviewSurface(context);
     const margin = 18;
     drawShape(

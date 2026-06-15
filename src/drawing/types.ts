@@ -27,6 +27,17 @@ export type Camera = {
   panY: number;
 };
 
+export type ProjectBrushAsset = {
+  id: string;
+  name: string;
+  path?: string;
+  kind: "bitmap";
+  source: "app" | "project";
+  storedFilePath?: string;
+  maskSourceMode?: "alpha" | "luminance" | "inverted-luminance" | "alpha-luminance" | "alpha-inverted-luminance";
+  smoothing?: "inherit" | "nearest" | "smooth";
+};
+
 export type DrawingProject = {
   width: number;
   height: number;
@@ -37,6 +48,7 @@ export type DrawingProject = {
   currentPageIndex: number;
   activeLayerId: string;
   camera: Camera;
+  brushAssets: ProjectBrushAsset[];
 };
 
 export type Snapshot = {

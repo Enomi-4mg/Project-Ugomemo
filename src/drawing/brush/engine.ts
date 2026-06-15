@@ -1,31 +1,42 @@
-import { getStrokeShapeDefinition } from "../strokeShapes";
 import { createBrushSettings } from "./settings";
 import { placeBrushStamps } from "./stampPlacement";
 import { renderStamps } from "./stampRenderer";
-import type { BrushPoint, StampColor, StampPatternSampler } from "./types";
-import type { StrokeShapeId } from "../strokeShapes";
+import type { BrushPoint, BrushRotationMode, BrushSmoothingMode, StampColor, StampPatternSampler } from "./types";
+import { resolveBrushTipMask, type BrushTipId } from "./tips";
 
-export function renderBrushStroke(args: {
+export async function renderBrushStroke(args: {
   context: CanvasRenderingContext2D;
   points: BrushPoint[];
   color: StampColor;
   size: number;
   spacingPercent: number;
   scatterPercent: number;
-  stampShape: StrokeShapeId;
+  brushTipId: BrushTipId;
   antiAlias: boolean;
+  rotationMode?: BrushRotationMode;
+  rotationDegrees?: number;
+  rotationJitterDegrees?: number;
+  scaleJitter?: number;
+  smoothing?: BrushSmoothingMode;
   seed: number;
   patternAlphaAt?: StampPatternSampler;
-}): void {
+}): Promise<void> {
   const settings = createBrushSettings(args);
-  const shape = getStrokeShapeDefinition(settings.stampShape);
-  const mask = shape.createMask(settings.size, { antiAlias: settings.antiAlias });
   const stamps = placeBrushStamps(args.points, settings);
+  const masks = await Promise.all(
+    stamps.map((stamp) =>
+      resolveBrushTipMask(settings.brushTipId, settings.size, {
+        smoothing: settings.effectiveSmoothing,
+        rotationDegrees: stamp.rotationDegrees,
+        scale: stamp.scale,
+      }),
+    ),
+  );
 
   renderStamps({
     context: args.context,
     stamps,
-    mask,
+    masks,
     color: args.color,
     patternAlphaAt: args.patternAlphaAt,
   });
