@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Project Ugomemo is a desktop app for pixel-style animation production.">
+  <meta property="og:title" content="Project Ugomemo">
+  <meta property="og:description" content="A production app for pixel drawing, frame animation, playback, and audio editing.">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <title>Project Ugomemo</title>
+  <link rel="stylesheet" href="./pages.css">
+</head>
+<body>
+  <main class="page-shell">
+    <nav class="language-switch" aria-label="Language">
+      <a href="./ja/">日本語</a>
+      <a aria-current="page" href="./">English</a>
+    </nav>
+
+    <header class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">Pixel Animation Workstation</p>
+        <h1>Project Ugomemo</h1>
+        <p class="summary">
+          A pixel-style animation production app.
+        </p>
+        <nav class="primary-actions" aria-label="Primary links">
+          <a class="primary-link" href="https://github.com/enomi-4mg/Project-Ugomemo">GitHub</a>
+          <a class="secondary-link" href="https://github.com/enomi-4mg/Project-Ugomemo/releases">Releases</a>
+        </nav>
+      </div>
+
+      <figure class="app-shot">
+        <div class="media-slideshow" aria-label="Project Ugomemo app preview">
+          <img class="media-slide media-slide-image" src="./assets/project-ugomemo-app.png" alt="Project Ugomemo running in Draw Mode with tool, canvas, and layer panels">
+          <video class="media-slide media-slide-video" src="./assets/sample-animation.mp4" autoplay muted loop playsinline aria-label="Sample animation playback"></video>
+        </div>
+      </figure>
+    </header>
+
+    <section class="launch-grid" aria-label="Main features">
+      <article class="launch-item">
+        <h2>Draw</h2>
+        <p>Use pen, brush, tone, eraser, and shape tools with three layers and a fixed palette to create crisp pixel artwork.</p>
+      </article>
+      <article class="launch-item">
+        <h2>Playback</h2>
+        <p>Review the frame rail, switch FPS and speed, and quickly check the motion of your animation.</p>
+      </article>
+      <article class="launch-item">
+        <h2>Audio</h2>
+        <p>Add materials, record audio, arrange four tracks, mix levels, and sync playback to frame timing.</p>
+      </article>
+    </section>
+
+    <section class="notes" aria-label="Project notes">
+      <h2>Notes</h2>
+      <div class="notes-body">
+        <p>
+          Desktop app project files use <code>.upj</code>. The app supports native save/load dialogs,
+          bundled audio assets, image export, and video/audio export through the Tauri sidecar flow.
+        </p>
+        <p>
+          This GitHub Pages site is static and can be served from <code>docs/</code>.
+          It mirrors the app's white grid, pink controls, mono type, and high-contrast panel rhythm.
+        </p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Project Ugomemoは、ピクセル風アニメーション制作のためのデスクトップアプリです。">
+  <meta property="og:title" content="Project Ugomemo">
+  <meta property="og:description" content="ピクセル描画、フレームアニメーション、再生、音声編集に対応した制作アプリ。">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <title>Project Ugomemo</title>
+  <link rel="stylesheet" href="../pages.css">
+</head>
+<body>
+  <main class="page-shell">
+    <nav class="language-switch" aria-label="Language">
+      <a aria-current="page" href="./">日本語</a>
+      <a href="../">English</a>
+    </nav>
+
+    <header class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">Pixel Animation Workstation</p>
+        <h1>Project Ugomemo</h1>
+        <p class="summary">
+          ピクセル風アニメーション制作アプリ。
+        </p>
+        <nav class="primary-actions" aria-label="Primary links">
+          <a class="primary-link" href="https://github.com/enomi-4mg/Project-Ugomemo">GitHub</a>
+          <a class="secondary-link" href="https://github.com/enomi-4mg/Project-Ugomemo/releases">Releases</a>
+        </nav>
+      </div>
+
+      <figure class="app-shot">
+        <div class="media-slideshow" aria-label="Project Ugomemoのプレビュー">
+          <img class="media-slide media-slide-image" src="../assets/project-ugomemo-app.png" alt="Draw Modeでツール、キャンバス、レイヤーパネルを表示しているProject Ugomemoの実行画面">
+          <video class="media-slide media-slide-video" src="../assets/sample-animation.mp4" autoplay muted loop playsinline aria-label="サンプルアニメーションの再生画面"></video>
+        </div>
+      </figure>
+    </header>
+
+    <section class="launch-grid" aria-label="主な機能">
+      <article class="launch-item">
+        <h2>Draw</h2>
+        <p>ペン、ブラシ、トーン、消しゴム、シェイプを使い、3レイヤーと固定パレットで硬いピクセル表現を作れます。</p>
+      </article>
+      <article class="launch-item">
+        <h2>Playback</h2>
+        <p>フレーム列を確認しながら、FPSと速度を切り替えてアニメーションの動きをすばやく検証できます。</p>
+      </article>
+      <article class="launch-item">
+        <h2>Audio</h2>
+        <p>素材追加、録音、4トラック配置、ミキサー、フレーム同期再生で音声つき作品を組み立てられます。</p>
+      </article>
+    </section>
+
+    <section class="notes" aria-label="プロジェクト情報">
+      <h2>Notes</h2>
+      <div class="notes-body">
+        <p>
+          デスクトップアプリのプロジェクトファイルは <code>.upj</code> を使います。
+          ネイティブの保存/読込ダイアログ、音声素材の同梱、画像書き出し、Tauri sidecarによる動画/音声書き出しに対応します。
+        </p>
+        <p>
+          このGitHub Pagesページは <code>docs/</code> から配信できる静的ページです。
+          アプリ本体の白いグリッド、ピンクのコントロール、モノスペース文字、強い罫線のリズムに合わせています。
+        </p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -222,7 +222,7 @@ Canvas Workstationの描画ツールはStrategy Patternで実装します。
 ### ツール一覧
 
 - Pen: 標準の線描画。Stroke Weightとround / squareのストローク形状を切り替えます。Penのstroke shapeは`ctx.lineCap` / `ctx.lineJoin`に任せず、明示的なstamp maskを使います。
-- Brush: 表現向けのstamp-based tool。Spacingはブラシサイズ比率のスタンプ間隔、Scatterはブラシサイズ比率のdeterministic random offsetとして扱います。将来のopacity、rotation、pressure、flow、bitmap brush tipはこの系統へ追加します。
+- Brush: 表現向けのstamp-based tool。Spacingはブラシサイズ比率のスタンプ間隔、Scatterはブラシサイズ比率のdeterministic random offsetとして扱います。Brush専用の`BrushTip`と、Brush専用のrotation / rotation jitter / scale jitter / smoothing表現設定を持ちます。opacity、flow、pressureは意図的に未対応です。
 - Tone: Pen Modeではshape maskとtone patternを掛け合わせるパターン付きストローク、Bucket Fill Modeではペイントバケツ型の塗りつぶしを行います。`ctx.getImageData()`を使うカスタムFlood Fillと、dot / line / noiseの3基本パターン、Fine / Normal / Coarseの3変種を組み合わせ、合計9種類をUIで選択できます。
 - Eraser: `ctx.globalCompositeOperation = 'destination-out'`を使い、pointerMoveのたびにリアルタイムで既存ピクセルを透明化します。
 - Shape: Line / Ellipse / Triangle / Rectangleを描画します。pointerDownで`getImageData()`によりキャンバススナップショットを保存し、pointerMoveで背景を復元してから新しいジオメトリを描きます。Lineは1回のドラッグで確定し、Triangle / Ellipse / Rectangleは2段階で確定します。
@@ -242,15 +242,93 @@ Pen strokeは4つの概念に分けます。
 
 BrushとTone Pen Modeは`src/drawing/brush/`の共有infrastructureを使います。
 
-- `settings.ts`: size / spacing / scatter / stamp shape / antiAlias / seedをまとめます。
-- `stampPlacement.ts`: pointer pathをspacingに従ってstamp列へ変換します。
-- `seededRandom.ts`: Scatterをstampごとに決定するseeded PRNGです。undo/redoやドラッグ中の再描画で結果が安定します。
-- `stampRenderer.ts`: `StampMask`を`ImageData`に`source-over`合成します。
-- `stamps/bitmap/loadBitmapStamp.ts`: PNGなどのbitmap brush tipをalpha maskとして読み込む最小loaderです。UI統合は後続作業に残します。
+- `settings.ts`: size / spacing / scatter / brush tip / antiAlias / rotationMode / rotationDegrees / rotationJitterDegrees / scaleJitter / smoothing / seedをまとめます。保存済み設定に新しいfieldがない場合は安全なdefaultへ戻します。
+- `presets.ts`: BrushPresetの最小modelとbuilt-in presetsを持ちます。BrushPresetはBrushTipを参照するdrawing behaviorであり、BrushTipそのものではありません。
+- `stampPlacement.ts`: pointer pathをspacingに従ってstamp列へ変換し、Brush Toolのstampごとのrotation / scale expressionを決定します。
+- `seededRandom.ts`: Scatter、random rotation、rotation jitter、scale jitterをstampごとに決定するseeded PRNGです。undo/redoやドラッグ中の再描画で結果が安定します。
+- `stampRenderer.ts`: stampごとの`StampMask`を`ImageData`に`source-over`合成します。選択中の描画色がRGBを決め、bitmap brush tipのPNG RGB channelは色に影響しません。
+- `tips/types.ts`: Brush専用の`BrushTip`抽象です。round / squareのprocedural tipと、built-in bitmap tipを同じ`StampMask`解決結果として扱います。
+- `tips/registry.ts`: built-in brush tip registryとapp-level custom brush tip definitionの登録口です。Penのstroke shape registryとは分離します。
+- `tips/resolveBrushTipMask.ts`: `brushTipId`、maskSourceMode、size、effective smoothing、rotation bucket、scale bucketから描画用`StampMask`を解決します。bitmap tipの読み込みに失敗した場合はround tipへfallbackし、描画セッションを落としません。
+- `tips/resizeStampMask.ts`: `StampMask`のリサイズを担当します。Brush sizeはbitmap tipの描画後max side lengthで、元PNGのaspect ratioを維持します。antiAlias OFFではnearest-neighbor、ONではalphaのsmooth samplingを使えます。
+- `stamps/bitmap/loadBitmapStamp.ts`: PNG sourceをcanvas `ImageData`として読み込む最小loaderです。リサイズ、cache、fallback、registry lookupはここへ入れません。
+- `stamps/bitmap/imageDataToStampMask.ts`: `ImageData`から`StampMask`へのmask conversionを担当します。PNG alphaだけでなく、bitmap Brush Tip preset用のRGB luminance modeを扱います。
+
+BrushTipはPenの`penShape`とは別概念です。Penのround / square stroke shapeは`src/drawing/strokeShapes/`に残し、bitmap brush tipをPen stroke shapeとして登録しません。Brush Toolは`ToolSettings.brushTipId`を持ち、Brush Tool表示中だけTool SettingsにBrush Tip selectorを出します。selectorはregistryのhuman-readable labelを使い、round / square / built-in bitmap tipを選べます。Brush previewも選択中のBrushTip maskを使い、bitmap tipのpreview解決に失敗した場合もfallbackしてUIを止めません。
+
+BrushPresetはBrushTipとは別のbehavior modelです。BrushTipはround、square、built-in bitmap、app-level imported bitmap、project-level bitmapのようなmask/sourceを表します。BrushPresetは`tipId`でBrushTipを参照し、size、spacing、scatter、rotation、jitter、scale jitter、smoothing、maskSourceModeなどの描画挙動をまとめます。BrushPresetにopacity、flow、pressure settingsは入りません。
+
+Minimal BrushPreset shape:
+
+```json
+{
+  "id": "preset:rough_chalk",
+  "name": "Rough Chalk",
+  "tipId": "tip:chalk",
+  "size": 18,
+  "spacing": 0.25,
+  "scatter": 0.1,
+  "rotationMode": "random",
+  "rotationDegrees": 0,
+  "rotationJitterDegrees": 30,
+  "scaleJitter": 0.15,
+  "smoothing": "smooth",
+  "maskSourceMode": "alpha",
+  "source": "custom"
+}
+```
+
+Custom BrushPresetはapp data配下の`brush_tips/presets.json`へ保存します。UIはcurrent Brush settingsをcustom presetとして保存し、built-in/custom presetをselectできます。custom presetはrename/delete可能で、built-in presetはdestructive edit不可です。Presetの`tipId`がmissingの場合はwarning/statusを出し、round tipへfallbackしてアプリを落としません。Project-level preset modelはまだ分離しておらず、app-level custom presetsとbuilt-in presetsだけを扱います。
+
+User-imported PNG Brush Tipsはapp-level user brush libraryとして管理します。Import UIはBrush Toolのsettingsに置き、Tauriのnative file dialogでPNGを選択します。選択ファイルはloadable imageとして検証し、元パスだけに依存せずapp data配下の`brush_tips/assets/`へコピーします。library metadataはapp data配下の`brush_tips/library.json`に保存します。duplicate importは現段階では常にnew assetとして保存し、unique idとunique filenameで衝突を避けます。
+
+Imported Brush Tip metadataは、stable `id`、display `name`、`sourceType: "custom"`、app-managed `storedFilePath`、`importedAt`、optional `maskSourceMode`を持ちます。custom idは`custom:` prefixを使い、built-in idsと衝突させません。起動時にlibrary metadataを読み込み、custom tip definitionsをBrush registryへ登録します。既存tool settingsに保存されたcustom `brushTipId`は後方互換のため一旦保持し、library読み込み後に存在しないcustom idならroundへfallbackします。
+
+Project-level Brush Tip assetsは`.upj`内のediting environment metadataです。描画結果そのものは従来通りlayer `ImageData`へbakedされ、brush assetsは別マシンで同じcustom Brush Tipを選んで編集を続けるために保存します。保存対象はprojectへattachedされたcustom Brush Tipだけで、app-level user brush library全体はembedしません。現在はcustom Brush Tipをimportまたはselectした時点でprojectの`brushAssets`へattachします。
+
+`.upj` metadataには`brushAssets`を追加します。PNG bytesはZIP内の`assets/brushes/<id>.png`相当のpathへ保存し、metadataは次の形を基本にします。
+
+```json
+{
+  "brushAssets": [
+    {
+      "id": "custom:example",
+      "name": "Example",
+      "path": "assets/brushes/custom_example.png",
+      "kind": "bitmap",
+      "source": "project",
+      "maskSourceMode": "alpha",
+      "smoothing": "inherit"
+    }
+  ]
+}
+```
+
+`id`はproject内でstable、`name`はhuman-readable、`path`は`.upj`内PNG path、`kind`はbitmap tip、`source`はproject-level assetを示します。`maskSourceMode`はmissing時`alpha`、`smoothing`はmissing時`inherit`へdefaultingします。Runtime registryではsourceを`built-in` / `custom`(app-level) / `project`に分けます。Project assetはload時に`project:` prefix付きruntime idとして登録し、built-in idやapp-level custom idを上書きしません。再保存時はruntime prefixをmetadataから外し、project内idの安定性を保ちます。
+
+Brush expression parametersはBrush Toolだけに適用します。`rotationMode`は`fixed` / `stroke-direction` / `random`です。`fixed`は`rotationDegrees`をbase angleにします。`stroke-direction`はpointer segmentからbase angleを取り、非常に短いsegmentでは前回角度または`rotationDegrees`へfallbackします。`random`はseeded randomでstampごとにbase angleを決め、同じstrokeの再描画で結果が変わらないようにします。`rotationDegrees`はfixedのbaseであり、stroke-direction / randomではoffsetとして加算します。`rotationJitterDegrees`はbase angleを中心にしたseeded random jitterです。`scaleJitter`は0.0-1.0のnormalized variationで、stamp sizeは安全な最小値へclampします。`smoothing`は`inherit` / `nearest` / `smooth`で、`inherit`は既存のglobal antiAlias設定に従います。
+
+Bitmap Brush Tipの`maskSourceMode`は、PNG pixelから`StampMask.alpha`を作る方法です。defaultは`alpha`で、保存済みtipや古いbuilt-in definitionにfieldがない場合も既存と同じalpha-only挙動にします。invalid modeは`alpha`へfallbackします。対応modeは次の通りです。
+
+- `alpha`: PNG alpha channelだけをmask alphaに使い、RGBは無視します。
+- `luminance`: RGBをweighted luminanceへ変換し、その値をmask alphaにします。
+- `inverted-luminance`: `255 - luminance`をmask alphaにし、暗いpixelほど強くします。
+- `alpha-luminance`: PNG alphaとluminanceを乗算します。
+- `alpha-inverted-luminance`: PNG alphaと`255 - luminance`を乗算します。
+
+Luminance formulaは`luminance = 0.2126 * R + 0.7152 * G + 0.0722 * B`です。最終mask alphaは0..255へclampします。選択中の描画色がrendered colorを決めるため、luminance系modeでもPNG RGBはmask strengthにだけ影響し、描画色そのものには影響しません。
+
+BrushTip cacheは2層です。original bitmap `StampMask`は`brushTipId`と`maskSourceMode`単位で保持し、PNGの再読み込みと再変換を避けます。transformed `StampMask`は`brushTipId`、`maskSourceMode`、size、effective smoothing mode、rotation bucket、scale bucketを含むkeyで保持し、同じ描画条件の再リサイズ・再回転を避けます。現在のrotation bucketは10 degrees、scale bucketは0.01です。procedural round / squareはこれまで通り同期生成でき、bitmap tipはresolver経由で既存stamp rendererへ渡せる`StampMask`になります。
+
+Stamp renderingはpartial `ImageData` updateを使います。stamp batchごとに実際のtransformed `StampMask` dimensionsからdirty rectangleを計算し、canvas boundsへclipしてから`getImageData(x, y, width, height)`します。各stampはdirty rectangle local coordinatesへ変換して描画し、tone pattern samplerにはproject coordinatesを渡します。`putImageData`も同じdirty rectangleだけを更新します。scatter、rotation、scale jitterのpaddingは解決済みmask dimensionsに含まれるため、full-canvas renderingと同じ結果を保ちながら更新範囲を縮小します。
+
+`brushTipId`、`rotationMode`、`rotationDegrees`、`rotationJitterDegrees`、`scaleJitter`、`smoothing`は`project-ugomemo.tool-settings.v1`のlocalStorage tool settingsに保存します。保存済みtool settingsにこれらがない場合はround、fixed、0、0、0、inheritへdefaultingし、既存設定を壊しません。既存`.upj`に`brushAssets` metadataがない場合はempty listとして読み込み、古いprojectのlayer dataはそのまま維持します。
+
+Imported or project assetがmissingまたはloadできない場合、bitmap resolverはwarningを出し、round tipへfallbackしてdrawing sessionを継続します。Project load時に`.upj`内のbrush PNGがmissingでもmetadataは可能な範囲でprojectに残し、user actionなしに破壊的削除はしません。Full brush preset editor、complete brush library import/exportはfuture workです。Brush opacity、Brush flow、pressure response、pressure-based size / opacity / flowは意図的にunsupportedです。
 
 Tone Pen Modeの品質改善は`finalAlpha = shapeAlpha × patternAlpha`を基本にします。
 
-- `shapeAlpha`: round / square / 将来のbitmap brush tipから来るstamp maskです。
+- `shapeAlpha`: round / squareのstamp maskから来ます。bitmap brush tipはBrush専用で、Tone Pen ModeのUIには接続しません。
 - `patternAlpha`: プロジェクト座標に固定されたdot / line / noise samplerから来ます。
 - patternはcanvas transformやstroke path stateに依存しません。
 - 同じproject pixelは常に同じtone pattern位置を参照します。
@@ -292,13 +370,13 @@ Tone UIは`src/ui/tone/tonePattern.ts`の`parseTonePattern()` / `buildTonePatter
 
 - 設定パネルには小さなPreview Canvasを置きます。
 - 各`DrawingTool`の`drawPreview`が現在の設定値でサンプルストロークやサンプル図形を描画します。
-- Stroke Weight、shapeType、penShape、tonePattern、Brush Spacing、Brush Scatter、Shape Fillの変更が即座に視覚化されます。
+- Stroke Weight、shapeType、penShape、brushTipId、tonePattern、Brush Spacing、Brush Scatter、Shape Fillの変更が即座に視覚化されます。
 - Tool Settingsはツールごとに保持します。
 - Pen / Brush / Tone / Eraser / Shapeを切り替えても各ツールの前回値を復元します。
 - カラーだけは現在の選択色として全ツールへ同期します。
 - 描画UI上の線幅表記は`Size`ではなく`Stroke Weight`に統一します。
 - Tool Settingsは`project-ugomemo.tool-settings.v1`としてlocalStorageに保存します。
-- 保存するのはsize、toneDensity、penShape、brushSpacing、brushScatter、shapeType、toneMode、tonePattern、shapeFill、antialiasなどの操作設定です。
+- 保存するのはsize、toneDensity、penShape、brushTipId、brushSpacing、brushScatter、shapeType、toneMode、tonePattern、shapeFill、antialiasなどの操作設定です。
 - colorは保存しません。colorは現在のアクティブレイヤーの色スロットから毎回同期し、プロジェクトのpalette / layer color ownershipと衝突させません。
 
 ## 履歴

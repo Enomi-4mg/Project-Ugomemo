@@ -145,8 +145,14 @@ Canvas Workstation は、共通インターフェースを持つ5種類の描画
 - Spacing 25%ならブラシサイズ20pxで5pxごとにスタンプを置きます。
 - Scatter 50%ならブラシサイズ20pxで最大10pxまでストローク軸からずらします。
 - Scatterはseeded randomを使うため、同じストロークは再描画しても同じ結果になります。
-- 現在はround / squareのprocedural maskを使います。
-- `loadBitmapStamp()`でPNGブラシ先端をalpha maskとして読み込める準備をしています。
+- Brush内部ではPenの`penShape`とは別に`brushTipId`を扱い、round / square / built-in bitmap tipsを選択できます。
+- Built-in bitmap brush tipsはPNGのalpha channelだけを`StampMask`へ変換します。RGB channelは描画色や濃度に影響しません。
+- Brushはfixed / stroke-direction / deterministic random rotation、rotation jitter、scale jitter、per-brush smoothingを持ちます。opacity、flow、pressure responseは未対応です。
+- Bitmap Brush Tip定義は将来のpreset用に`maskSourceMode`を指定でき、未指定時は従来通り`alpha`を使います。
+- Desktop appではPNG Brush Tipをimportできます。画像はapp-managed brush libraryへコピーされ、Brush Tip selectorから選択できます。
+- `.upj`保存時はprojectにattachedされたcustom Brush Tip PNGだけを`assets/brushes/`へ同梱し、別環境で再編集できるようにします。
+- Brush PresetはBrush Tipとは別に、tipId、size、spacing、scatter、rotation、jitter、smoothingなどの描画挙動を保存します。
+- Stamp renderingはdirty rectangleだけを`ImageData`更新し、full-canvas更新を避けます。
 
 ### Tone
 
