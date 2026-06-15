@@ -2,7 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { documentDir, join } from "@tauri-apps/api/path";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { PALETTE } from "../drawing/project";
-import type { DrawingProject, Frame, Layer } from "../drawing/types";
+import type { BrushPreset } from "../drawing/brush/presets";
+import type { DrawingProject, Frame, Layer, ProjectBrushAsset } from "../drawing/types";
 
 type LayerPayload = {
   id: string;
@@ -29,6 +30,7 @@ type ProjectPayload = {
   timelineClips: PersistedTimelineClip[];
   audioAssets?: Record<string, PersistedAudioAsset>;
   audioTracks?: PersistedAudioTrack[];
+  brushAssets?: ProjectBrushAsset[];
 };
 
 export type PersistedAudioFile = {
@@ -94,6 +96,15 @@ export type AudioWorkstationState = {
   timelineClips: PersistedTimelineClip[];
   audioAssets: Record<string, PersistedAudioAsset>;
   audioTracks: PersistedAudioTrack[];
+};
+
+export type PersistedCustomBrushTip = {
+  id: string;
+  name: string;
+  sourceType: "custom";
+  storedFilePath: string;
+  importedAt: string;
+  maskSourceMode?: "alpha" | "luminance" | "inverted-luminance" | "alpha-luminance" | "alpha-inverted-luminance";
 };
 
 export type ProjectPackagePaths = {
@@ -260,6 +271,41 @@ export async function selectAudioFiles(): Promise<AudioFilePath[]> {
   });
 }
 
+export async function loadCustomBrushTips(): Promise<PersistedCustomBrushTip[]> {
+  if (!canUseTauri()) {
+    return [];
+  }
+  return invoke<PersistedCustomBrushTip[]>("load_custom_brush_tips");
+}
+
+export async function loadCustomBrushPresets(): Promise<BrushPreset[]> {
+  if (!canUseTauri()) {
+    return [];
+  }
+  return invoke<BrushPreset[]>("load_custom_brush_presets");
+}
+
+export async function saveCustomBrushPresets(presets: BrushPreset[]): Promise<void> {
+  if (!canUseTauri()) {
+    return;
+  }
+  await invoke("save_custom_brush_presets", { presets });
+}
+
+export async function importCustomBrushTipWithNativeDialog(): Promise<PersistedCustomBrushTip | null> {
+  const selectedPath = await open({
+    multiple: false,
+    filters: [{ name: "PNG Brush Tip", extensions: ["png"] }],
+    title: "Import PNG Brush Tip",
+  });
+
+  if (!selectedPath || Array.isArray(selectedPath)) {
+    return null;
+  }
+
+  return invoke<PersistedCustomBrushTip>("import_custom_brush_tip", { selectedPath });
+}
+
 export async function inspectAudioFiles(paths: string[]): Promise<AudioFilePath[]> {
   return invoke<AudioFilePath[]>("inspect_audio_files", { paths });
 }
@@ -335,16 +381,20 @@ export function canUseTauri(): boolean {
 }
 
 async function getDefaultSaveDialogPath(projectName: string): Promise<string> {
+  if (canUseTauri()) {
+    return invoke<string>("default_project_save_dialog_path", { projectName });
+  }
+
   const documents = await documentDir();
   const safeName = sanitizeProjectName(projectName);
-  return join(documents, `${safeName}.upj`);
+  return join(documents, "Project Ugomemo", `${safeName}.upj`);
 }
 
 function sanitizeProjectName(projectName: string): string {
   const safeName = projectName
     .trim()
     .replace(/\.[Uu][Pp][Jj]$/, "")
-    .replace(/[^a-zA-Z0-9_-]+/g, "_")
+    .replace(/[^\p{L}\p{N}_-]+/gu, "_")
     .replace(/^_+|_+$/g, "");
 
   return safeName || "untitled_project";
@@ -374,6 +424,7 @@ function toProjectPayload(project: DrawingProject, audio: AudioWorkstationState)
     timelineClips: audio.timelineClips.map(sanitizeTimelineClipForSave),
     audioAssets: audio.audioAssets,
     audioTracks: audio.audioTracks.map(sanitizeAudioTrackForSave),
+    brushAssets: project.brushAssets,
   };
 }
 
@@ -466,5 +517,6 @@ function fromProjectPayload(payload: ProjectPayload): DrawingProject {
       panX: 0,
       panY: 0,
     },
+    brushAssets: payload.brushAssets ?? [],
   };
 }

@@ -1,13 +1,15 @@
 use image::codecs::png::PngEncoder;
 use image::{ColorType, ImageEncoder};
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
 use std::collections::VecDeque;
 use std::fs::{self, File};
+use std::hash::{Hash, Hasher};
 use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive};
 
@@ -52,6 +54,8 @@ pub struct ProjectPayload {
     audio_assets: std::collections::HashMap<String, AudioAssetPayload>,
     #[serde(default)]
     audio_tracks: Vec<AudioTrackPayload>,
+    #[serde(default)]
+    brush_assets: Vec<ProjectBrushAssetPayload>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -138,6 +142,55 @@ pub struct TimelineClipPayload {
     fade_out_frames: f64,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomBrushTipPayload {
+    id: String,
+    name: String,
+    source_type: String,
+    stored_file_path: String,
+    imported_at: String,
+    #[serde(default = "default_brush_tip_mask_source_mode")]
+    mask_source_mode: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectBrushAssetPayload {
+    id: String,
+    name: String,
+    #[serde(default)]
+    path: String,
+    kind: String,
+    source: String,
+    #[serde(default)]
+    stored_file_path: String,
+    #[serde(default = "default_brush_tip_mask_source_mode")]
+    mask_source_mode: String,
+    #[serde(default = "default_brush_tip_smoothing")]
+    smoothing: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrushPresetPayload {
+    id: String,
+    name: String,
+    tip_id: String,
+    size: u32,
+    spacing: f64,
+    scatter: f64,
+    rotation_mode: String,
+    rotation_degrees: f64,
+    rotation_jitter_degrees: f64,
+    scale_jitter: f64,
+    #[serde(default = "default_brush_tip_smoothing")]
+    smoothing: String,
+    #[serde(default = "default_brush_tip_mask_source_mode")]
+    mask_source_mode: String,
+    source: String,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct ProjectMetadata {
     format: String,
@@ -160,6 +213,22 @@ struct ProjectMetadata {
     audio_assets: std::collections::HashMap<String, AudioAssetPayload>,
     #[serde(default)]
     audio_tracks: Vec<AudioTrackPayload>,
+    #[serde(default)]
+    brush_assets: Vec<ProjectBrushAssetMetadata>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectBrushAssetMetadata {
+    id: String,
+    name: String,
+    path: String,
+    kind: String,
+    source: String,
+    #[serde(default = "default_brush_tip_mask_source_mode")]
+    mask_source_mode: String,
+    #[serde(default = "default_brush_tip_smoothing")]
+    smoothing: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -292,18 +361,25 @@ fn default_project_package_paths(project_name: String) -> Result<ProjectSaveResu
 }
 
 #[tauri::command]
+fn default_project_save_dialog_path(project_name: String) -> Result<String, String> {
+    let project_name = sanitize_project_name(&project_name);
+    let project_root = documents_dir()?.join("Project Ugomemo");
+    fs::create_dir_all(&project_root).map_err(|error| error.to_string())?;
+
+    Ok(project_root
+        .join(format!("{project_name}.upj"))
+        .to_string_lossy()
+        .to_string())
+}
+
+#[tauri::command]
 fn save_project_package(
     selected_path: String,
     project: ProjectPayload,
 ) -> Result<ProjectSaveResult, String> {
-    let selected_path = PathBuf::from(selected_path);
-    let project_name = selected_path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .map(sanitize_project_name)
-        .unwrap_or_else(|| "untitled_project".to_string());
-    let documents = documents_dir()?;
-    let paths = project_package_paths(&documents, &project_name);
+    let selected_path = ensure_upj_extension(PathBuf::from(selected_path));
+    let project_name = sanitize_project_name(&project_name_from_path(&selected_path));
+    let paths = project_package_paths_from_selected_path(&selected_path, &project_name)?;
 
     fs::create_dir_all(&paths.image_dir).map_err(|error| error.to_string())?;
     fs::create_dir_all(&paths.movie_dir).map_err(|error| error.to_string())?;
@@ -314,7 +390,10 @@ fn save_project_package(
 }
 
 #[tauri::command]
-fn load_project_package(selected_path: String) -> Result<ProjectLoadResult, String> {
+fn load_project_package(
+    app: tauri::AppHandle,
+    selected_path: String,
+) -> Result<ProjectLoadResult, String> {
     let selected_path = PathBuf::from(selected_path);
     let file = File::open(&selected_path).map_err(|error| error.to_string())?;
     let mut archive = ZipArchive::new(file).map_err(|error| error.to_string())?;
@@ -353,6 +432,8 @@ fn load_project_package(selected_path: String) -> Result<ProjectLoadResult, Stri
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
+    let brush_assets =
+        load_project_brush_assets(&app, &selected_path, &mut archive, &metadata.brush_assets)?;
 
     let project = ProjectPayload {
         width: metadata.width,
@@ -367,6 +448,7 @@ fn load_project_package(selected_path: String) -> Result<ProjectLoadResult, Stri
         timeline_clips: metadata.timeline_clips.clone(),
         audio_assets: metadata.audio_assets.clone(),
         audio_tracks: metadata.audio_tracks.clone(),
+        brush_assets,
     };
 
     validate_project(&project)?;
@@ -473,6 +555,85 @@ fn rename_file(path: String, new_name: String) -> Result<String, String> {
     let next_path = parent.join(format!("{safe_stem}{extension}"));
     fs::rename(&path, &next_path).map_err(|error| error.to_string())?;
     Ok(next_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn load_custom_brush_tips(app: tauri::AppHandle) -> Result<Vec<CustomBrushTipPayload>, String> {
+    read_custom_brush_library(&app)
+}
+
+#[tauri::command]
+fn load_custom_brush_presets(app: tauri::AppHandle) -> Result<Vec<BrushPresetPayload>, String> {
+    read_custom_brush_presets(&app)
+}
+
+#[tauri::command]
+fn save_custom_brush_presets(
+    app: tauri::AppHandle,
+    presets: Vec<BrushPresetPayload>,
+) -> Result<(), String> {
+    write_custom_brush_presets(&app, &presets)
+}
+
+#[tauri::command]
+fn import_custom_brush_tip(
+    app: tauri::AppHandle,
+    selected_path: String,
+) -> Result<CustomBrushTipPayload, String> {
+    let source_path = PathBuf::from(&selected_path);
+    if !source_path.is_file() {
+        return Err("Selected brush tip file does not exist.".to_string());
+    }
+
+    image::ImageReader::open(&source_path)
+        .map_err(|error| format!("Could not open brush tip image: {error}"))?
+        .with_guessed_format()
+        .map_err(|error| format!("Could not inspect brush tip image: {error}"))?
+        .decode()
+        .map_err(|error| format!("Selected file is not a loadable image: {error}"))?;
+
+    let bytes = fs::read(&source_path).map_err(|error| error.to_string())?;
+    let mut hasher = DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    let content_hash = hasher.finish();
+    let imported_at_millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_millis();
+    let extension = source_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "png".to_string());
+    let source_name = source_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .map(sanitize_project_name)
+        .unwrap_or_else(|| "custom_brush".to_string());
+    let asset_dir = custom_brush_asset_dir(&app)?;
+    fs::create_dir_all(&asset_dir).map_err(|error| error.to_string())?;
+    let file_name = format!("{source_name}_{imported_at_millis}_{content_hash:016x}.{extension}");
+    let stored_path = asset_dir.join(file_name);
+    fs::write(&stored_path, bytes).map_err(|error| error.to_string())?;
+
+    let tip = CustomBrushTipPayload {
+        id: format!("custom:{imported_at_millis:x}:{content_hash:016x}"),
+        name: source_path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "Custom Brush".to_string()),
+        source_type: "custom".to_string(),
+        stored_file_path: stored_path.to_string_lossy().to_string(),
+        imported_at: imported_at_millis.to_string(),
+        mask_source_mode: default_brush_tip_mask_source_mode(),
+    };
+
+    let mut library = read_custom_brush_library(&app)?;
+    library.push(tip.clone());
+    write_custom_brush_library(&app, &library)?;
+    Ok(tip)
 }
 
 #[tauri::command]
@@ -795,6 +956,11 @@ fn write_project_file(path: &Path, project: &ProjectPayload) -> Result<(), Strin
         timeline_clips: project.timeline_clips.clone(),
         audio_assets: project.audio_assets.clone(),
         audio_tracks: project.audio_tracks.clone(),
+        brush_assets: project
+            .brush_assets
+            .iter()
+            .map(project_brush_asset_metadata)
+            .collect(),
         frames: project
             .frames
             .iter()
@@ -840,8 +1006,149 @@ fn write_project_file(path: &Path, project: &ProjectPayload) -> Result<(), Strin
         }
     }
 
+    for asset in &project.brush_assets {
+        if asset.kind != "bitmap" {
+            continue;
+        }
+        let source_path = PathBuf::from(&asset.stored_file_path);
+        if asset.stored_file_path.is_empty() || !source_path.is_file() {
+            eprintln!(
+                "Project brush asset \"{}\" is missing; preserving metadata without asset bytes.",
+                asset.id
+            );
+            continue;
+        }
+        let bytes = fs::read(&source_path).map_err(|error| error.to_string())?;
+        let metadata = project_brush_asset_metadata(asset);
+        archive
+            .start_file(metadata.path, options)
+            .map_err(|error| error.to_string())?;
+        archive
+            .write_all(&bytes)
+            .map_err(|error| error.to_string())?;
+    }
+
     archive.finish().map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn project_brush_asset_metadata(asset: &ProjectBrushAssetPayload) -> ProjectBrushAssetMetadata {
+    let metadata_id = asset
+        .id
+        .strip_prefix("project:")
+        .unwrap_or(&asset.id)
+        .to_string();
+    ProjectBrushAssetMetadata {
+        id: metadata_id.clone(),
+        name: asset.name.clone(),
+        path: if asset.path.is_empty() {
+            format!(
+                "assets/brushes/{}.png",
+                sanitize_asset_file_stem(&metadata_id)
+            )
+        } else {
+            asset.path.clone()
+        },
+        kind: "bitmap".to_string(),
+        source: "project".to_string(),
+        mask_source_mode: normalize_brush_tip_mask_source_mode(&asset.mask_source_mode),
+        smoothing: normalize_brush_tip_smoothing(&asset.smoothing),
+    }
+}
+
+fn load_project_brush_assets(
+    app: &tauri::AppHandle,
+    selected_path: &Path,
+    archive: &mut ZipArchive<File>,
+    metadata_assets: &[ProjectBrushAssetMetadata],
+) -> Result<Vec<ProjectBrushAssetPayload>, String> {
+    let project_key = selected_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .map(sanitize_project_name)
+        .unwrap_or_else(|| "loaded_project".to_string());
+    let target_dir = custom_brush_library_dir(app)?
+        .join("project_assets")
+        .join(project_key);
+    fs::create_dir_all(&target_dir).map_err(|error| error.to_string())?;
+
+    metadata_assets
+        .iter()
+        .map(|asset| {
+            let file_name = Path::new(&asset.path)
+                .file_name()
+                .and_then(|value| value.to_str())
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| format!("{}.png", sanitize_asset_file_stem(&asset.id)));
+            let stored_path = target_dir.join(file_name);
+            let stored_file_path = match read_zip_bytes(archive, &asset.path) {
+                Ok(bytes) => {
+                    fs::write(&stored_path, bytes).map_err(|error| error.to_string())?;
+                    stored_path.to_string_lossy().to_string()
+                }
+                Err(error) => {
+                    eprintln!(
+                        "Project brush asset \"{}\" could not be loaded from {}: {}",
+                        asset.id, asset.path, error
+                    );
+                    String::new()
+                }
+            };
+
+            Ok(ProjectBrushAssetPayload {
+                id: format!("project:{}", asset.id),
+                name: asset.name.clone(),
+                path: asset.path.clone(),
+                kind: if asset.kind.is_empty() {
+                    "bitmap".to_string()
+                } else {
+                    asset.kind.clone()
+                },
+                source: "project".to_string(),
+                stored_file_path,
+                mask_source_mode: normalize_brush_tip_mask_source_mode(&asset.mask_source_mode),
+                smoothing: normalize_brush_tip_smoothing(&asset.smoothing),
+            })
+        })
+        .collect()
+}
+
+fn sanitize_asset_file_stem(value: &str) -> String {
+    let safe = value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_string();
+    if safe.is_empty() {
+        "custom_brush".to_string()
+    } else {
+        safe
+    }
+}
+
+fn normalize_brush_tip_mask_source_mode(value: &str) -> String {
+    match value {
+        "luminance"
+        | "inverted-luminance"
+        | "alpha-luminance"
+        | "alpha-inverted-luminance"
+        | "alpha" => value.to_string(),
+        _ => default_brush_tip_mask_source_mode(),
+    }
+}
+
+fn normalize_brush_tip_smoothing(value: &str) -> String {
+    match value {
+        "nearest" | "smooth" | "inherit" => value.to_string(),
+        _ => default_brush_tip_smoothing(),
+    }
 }
 
 fn documents_dir() -> Result<PathBuf, String> {
@@ -863,7 +1170,11 @@ fn ffmpeg_cmd() -> String {
     if let Ok(val) = std::env::var("UGOMEMO_FFMPEG_PATH") {
         return val;
     }
-    let names: Vec<&str> = if cfg!(windows) { vec!["ffmpeg.exe", "ffmpeg"] } else { vec!["ffmpeg"] };
+    let names: Vec<&str> = if cfg!(windows) {
+        vec!["ffmpeg.exe", "ffmpeg"]
+    } else {
+        vec!["ffmpeg"]
+    };
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             for name in &names {
@@ -893,7 +1204,11 @@ fn ffprobe_cmd() -> String {
     if let Ok(val) = std::env::var("UGOMEMO_FFPROBE_PATH") {
         return val;
     }
-    let names: Vec<&str> = if cfg!(windows) { vec!["ffprobe.exe", "ffprobe"] } else { vec!["ffprobe"] };
+    let names: Vec<&str> = if cfg!(windows) {
+        vec!["ffprobe.exe", "ffprobe"]
+    } else {
+        vec!["ffprobe"]
+    };
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             for name in &names {
@@ -1020,28 +1335,82 @@ fn summarize_audio_with_ffmpeg(path: &Path, buckets: usize) -> Result<Vec<f32>, 
 
 fn project_package_paths(documents: &Path, project_name: &str) -> ProjectSaveResult {
     let project_dir = documents.join("Project Ugomemo").join(project_name);
+    let project_path = project_dir.join(format!("{project_name}.upj"));
+
+    project_package_paths_for_file(&project_path, project_name)
+        .expect("default project package path always has a parent directory")
+}
+
+fn project_package_paths_for_file(
+    project_path: &Path,
+    project_name: &str,
+) -> Result<ProjectSaveResult, String> {
+    let project_dir = project_path
+        .parent()
+        .ok_or_else(|| "Project path has no parent directory.".to_string())?;
     let image_dir = project_dir.join("image");
     let movie_dir = project_dir.join("movie");
     let record_dir = project_dir.join("record");
 
-    ProjectSaveResult {
+    Ok(ProjectSaveResult {
         project_name: project_name.to_string(),
-        project_path: project_dir
-            .join(format!("{project_name}.upj"))
-            .to_string_lossy()
-            .to_string(),
+        project_path: project_path.to_string_lossy().to_string(),
         image_dir: image_dir.to_string_lossy().to_string(),
         movie_dir: movie_dir.to_string_lossy().to_string(),
         record_dir: record_dir.to_string_lossy().to_string(),
+    })
+}
+
+fn project_package_paths_from_selected_path(
+    selected_path: &Path,
+    project_name: &str,
+) -> Result<ProjectSaveResult, String> {
+    let selected_dir = selected_path
+        .parent()
+        .ok_or_else(|| "Project path has no parent directory.".to_string())?;
+    let project_dir = if selected_dir
+        .file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|directory_name| directory_name == project_name)
+    {
+        selected_dir.to_path_buf()
+    } else {
+        selected_dir.join(project_name)
+    };
+    let project_path = project_dir.join(format!("{project_name}.upj"));
+
+    project_package_paths_for_file(&project_path, project_name)
+}
+
+fn ensure_upj_extension(path: PathBuf) -> PathBuf {
+    if path
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("upj"))
+    {
+        path
+    } else {
+        path.with_extension("upj")
     }
+}
+
+fn project_name_from_path(path: &Path) -> String {
+    path.file_stem()
+        .and_then(|value| value.to_str())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "untitled_project".to_string())
 }
 
 fn sanitize_project_name(name: &str) -> String {
     let mut sanitized = String::new();
-    let trimmed = name.trim().trim_end_matches(".upj");
+    let trimmed = name
+        .trim()
+        .trim_end_matches(".upj")
+        .trim_end_matches(".UPJ");
 
     for character in trimmed.chars() {
-        if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+        if character.is_alphanumeric() || character == '-' || character == '_' {
             sanitized.push(character);
         } else if character.is_whitespace() || character == '.' {
             sanitized.push('_');
@@ -1163,6 +1532,77 @@ fn default_project_fps() -> f64 {
     6.0
 }
 
+fn default_brush_tip_mask_source_mode() -> String {
+    "alpha".to_string()
+}
+
+fn default_brush_tip_smoothing() -> String {
+    "inherit".to_string()
+}
+
+fn custom_brush_library_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|path| path.join("brush_tips"))
+        .map_err(|error| error.to_string())
+}
+
+fn custom_brush_asset_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(custom_brush_library_dir(app)?.join("assets"))
+}
+
+fn custom_brush_library_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(custom_brush_library_dir(app)?.join("library.json"))
+}
+
+fn custom_brush_presets_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(custom_brush_library_dir(app)?.join("presets.json"))
+}
+
+fn read_custom_brush_library(app: &tauri::AppHandle) -> Result<Vec<CustomBrushTipPayload>, String> {
+    let path = custom_brush_library_path(app)?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    serde_json::from_str(&text).map_err(|error| error.to_string())
+}
+
+fn write_custom_brush_library(
+    app: &tauri::AppHandle,
+    library: &[CustomBrushTipPayload],
+) -> Result<(), String> {
+    let path = custom_brush_library_path(app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let text = serde_json::to_string_pretty(library).map_err(|error| error.to_string())?;
+    fs::write(path, text).map_err(|error| error.to_string())
+}
+
+fn read_custom_brush_presets(app: &tauri::AppHandle) -> Result<Vec<BrushPresetPayload>, String> {
+    let path = custom_brush_presets_path(app)?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    serde_json::from_str(&text).map_err(|error| error.to_string())
+}
+
+fn write_custom_brush_presets(
+    app: &tauri::AppHandle,
+    presets: &[BrushPresetPayload],
+) -> Result<(), String> {
+    let path = custom_brush_presets_path(app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let text = serde_json::to_string_pretty(presets).map_err(|error| error.to_string())?;
+    fs::write(path, text).map_err(|error| error.to_string())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -1171,6 +1611,7 @@ pub fn run() {
             flood_fill,
             save_upj_project,
             default_project_package_paths,
+            default_project_save_dialog_path,
             save_project_package,
             load_project_package,
             write_binary_file,
@@ -1178,6 +1619,10 @@ pub fn run() {
             encode_wav_to_mp3_file,
             delete_file,
             rename_file,
+            load_custom_brush_tips,
+            load_custom_brush_presets,
+            save_custom_brush_presets,
+            import_custom_brush_tip,
             inspect_audio_files,
             validate_audio_assets,
             bundle_project_assets,
