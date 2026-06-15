@@ -383,20 +383,19 @@ npm run dev
 
 - `push`のうちタグ名が`v*`（例: `v1.0.0`）のときに発火します。
 - CIの検証に加え、`npm run tauri:build`でプラットフォーム向けのバンドルを生成します。
-- 現在はWindows向けのマトリクスで`src-tauri/target/release/bundle/`以下の成果物を収集します。
+- 現在はmacOS / Windows向けのマトリクスで`src-tauri/target/release/bundle/`以下の成果物を収集します。
 - 生成される成果物例は`msi`、`nsis`（`.exe`）、zipなど、Tauriのバンドル出力全体です。
 - ワークフローはタグpushを検出して起動します。
-- GitHubのRelease作成操作（UIでのリリース作成）以前にタグをpushするか、`gh`コマンドや`git`でタグを作成してpushしてください。
+- `v*`タグをpushすると、GitHub Releaseの作成と成果物アップロードまで自動で行います。
 
 ### 注意点
 
 - ワークフローは現在、タグ名プレフィックス`v`にマッチするもののみをリリースビルドとして扱います。
 - 例: `v0.3.1`
-- Releaseワークフローはリリースオブジェクト自体を自動で作成しません。
-- Actionsの成果物はワークフロー実行のアーティファクトとして保存されます。
-- 必要であれば、後段で`gh release create`や`actions/create-release`を追加してGitHub Releaseに自動で添付できます。
+- Releaseワークフローは`softprops/action-gh-release`でGitHub Releaseを作成し、対応するバンドル成果物を添付します。
+- Actionsの成果物もワークフロー実行のアーティファクトとして保存されます。
 - バイナリは`src-tauri/target/release/bundle/`以下に出力されます。
-- ワークフローはこのパスをまとめてアップロードします。
+- ワークフローはこのパスをアーティファクトとして保存し、Release assetにもアップロードします。
 - `ffmpeg`等の外部ツールはlocalの書き出しで必要です。
 - CIがこれらを必要とする場合は、ワークフローに`ffmpeg`のインストールステップを追加してください。
 
@@ -425,10 +424,10 @@ git tag -a v1.0.0 -m "Release v1.0.0"
 git push origin v1.0.0
 ```
 
-GitHub CLIを使う例:
+GitHub CLIで手動リリースを作る例:
 
 ```bash
-# タグと GitHub リリースを同時に作る（ローカルでビルド済みの成果物を手動でアップロードする場合）
+# 自動Release workflowを使わず、手元の成果物を手動でアップロードする場合
 gh release create v1.0.0 --title "v1.0.0" --notes "Release v1.0.0"
 ```
 
@@ -445,7 +444,7 @@ gh release create v1.0.0 --title "v1.0.0" --notes "Release v1.0.0"
 3. 必要なら`ffmpeg`等の外部ツールが利用可能か確認する
 4. タグを作って`git push origin <tag>`する
 
-必要なら、ReleaseワークフローにGitHub Releaseの自動作成・アセット添付を追加します。
+ReleaseワークフローはGitHub Releaseの自動作成・アセット添付まで行います。
 
 ## ffmpeg バンドルとライセンス
 
