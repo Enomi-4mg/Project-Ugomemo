@@ -18,6 +18,7 @@
 - [書き出し](#書き出し)
 - [ステータス](#ステータス)
 - [UI方針](#ui方針)
+- [GitHub Pagesサイト](#github-pagesサイト)
 - [拡張ポイント](#拡張ポイント)
 
 ## 目的
@@ -732,6 +733,37 @@ SnapはAudio Mode編集時の配置補助であり、保存条件ではありま
 - Record行にはRecord/StopとPause/Resumeを横並びで置きます。
 - 録音ボタンは赤系の強い色とRecording中の反転表示で状態を伝えます。
 - Pause中は音声chunkの追加を止め、Resume後に同じtakeへ継続録音します。
+
+## GitHub Pagesサイト
+
+`docs/`配下のGitHub Pagesサイトは、アプリの詳細仕様書ではなく、初見ユーザーとポートフォリオ閲覧者に向けた入口として設計します。
+
+### 役割
+
+- Project Ugomemoが何をするデスクトップアニメーション制作ツールなのかをHeroで説明します。
+- Current Statusで初期テスト版であること、最新リリース、試せる配布形式を示します。
+- Releases、GitHub、READMEへの導線をHeroから見える位置に置きます。
+- Conceptで、軽く直接的に短いフレームアニメーションを試作する制作体験を説明します。
+- FeaturesはDraw / Playback / Audioの雰囲気を残しつつ、Drawing、Animation、Layers、Playback、Audio、File、Exportを一覧化します。
+- Basic Workflowで、新規作成から描画、再生確認、音声配置、書き出しまでを短い手順で示します。
+- Tech StackでTauri、React、TypeScript、Rust、Web Audio API、ffmpeg sidecar export flowを伝えます。
+- 詳細仕様や開発者向け情報はREADMEへ誘導します。
+
+### コンテンツ運用
+
+- 日本語ページ`docs/ja/index.html`と英語ページ`docs/index.html`は、情報構成に大きな差が出ないよう同時に更新します。
+- GitHub Releasesのタグ、対応OS、配布形式は、実際のReleaseページとassetを確認してから記載します。
+- 存在しない直接ダウンロードリンクは作りません。試用導線はReleasesページへのリンクを基本にします。
+- Samplesは実在する`docs/assets/`内の作例だけを参照します。
+- 2026-06-16時点では、掲載中サンプルは`docs/assets/sample-animation.mp4`の1件です。
+- 今後作例を追加する場合は、Samples sectionのカード構造へ実在する画像/動画/`.upj`だけを追加します。
+
+### ビジュアル方針
+
+- アプリ本体と同じ白いグリッド、ピンクの罫線、deep pinkの選択色、モノスペース文字を維持します。
+- 新しい情報量を追加しても、カードの入れ子や過剰な装飾を避けます。
+- モバイルではCTA、Features表、Samplesカードを1列に落とし、横スクロールを出さないことを優先します。
+- 画像には内容が分かるaltを付け、動画だけで意味が伝わらない場合は周辺テキストで補足します。
 
 ## 拡張ポイント
 

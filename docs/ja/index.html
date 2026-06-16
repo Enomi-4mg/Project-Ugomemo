@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="ピクセル風アニメーション制作アプリ。">
+  <meta name="description" content="ピクセル風のフレームアニメーションを描き、再生確認し、音声と同期して書き出すためのデスクトップ制作ツール。">
   <meta property="og:title" content="Project Ugomemo">
-  <meta property="og:description" content="ピクセル風アニメーション制作アプリ。">
+  <meta property="og:description" content="ピクセル風のフレームアニメーションを描き、再生確認し、音声と同期して書き出すためのデスクトップ制作ツール。">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://enomi-4mg.github.io/Project-Ugomemo/ja/">
   <meta property="og:image" content="https://enomi-4mg.github.io/Project-Ugomemo/assets/og-image.png">
@@ -18,7 +18,7 @@
   <meta property="og:locale:alternate" content="en_US">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Project Ugomemo">
-  <meta name="twitter:description" content="ピクセル風アニメーション制作アプリ。">
+  <meta name="twitter:description" content="ピクセル風のフレームアニメーションを描き、再生確認し、音声と同期して書き出すためのデスクトップ制作ツール。">
   <meta name="twitter:image" content="https://enomi-4mg.github.io/Project-Ugomemo/assets/og-image.png">
   <meta name="twitter:image:alt" content="Project Ugomemo app icon">
   <title>Project Ugomemo</title>
@@ -41,11 +41,15 @@
         <p class="eyebrow">Pixel Animation Workstation</p>
         <h1>Project Ugomemo</h1>
         <p class="summary">
-          ピクセル風アニメーション制作アプリ。
+          Project Ugomemo は、ピクセル風のフレームアニメーションを描き、再生確認し、音声と同期して書き出すためのデスクトップ制作ツールです。
+        </p>
+        <p class="hero-note">
+          現在の最新テストリリースは <strong>v0.1.5-test</strong> です。GitHub Releases から macOS Apple Silicon向けDMG、Windows x64向けEXE/MSI を入手できます。
         </p>
         <nav class="primary-actions" aria-label="Primary links">
-          <a class="primary-link" href="https://github.com/enomi-4mg/Project-Ugomemo">GitHub</a>
-          <a class="secondary-link" href="https://github.com/enomi-4mg/Project-Ugomemo/releases">Releases</a>
+          <a class="primary-link" href="https://github.com/Enomi-4mg/Project-Ugomemo/releases">Download latest test build</a>
+          <a class="secondary-link" href="https://github.com/Enomi-4mg/Project-Ugomemo">GitHub</a>
+          <a class="secondary-link" href="https://github.com/Enomi-4mg/Project-Ugomemo#readme">README</a>
         </nav>
       </div>
 
@@ -72,18 +76,134 @@
       </article>
     </section>
 
-    <section class="notes" aria-label="プロジェクト情報">
-      <h2>Notes</h2>
+    <section class="notes" aria-labelledby="status-title">
+      <h2 id="status-title">現在の状態</h2>
       <div class="notes-body">
         <p>
-          デスクトップアプリのプロジェクトファイルは <code>.upj</code> を使います。
-          ネイティブの保存/読込ダイアログ、音声素材の同梱、画像書き出し、Tauri sidecarによる動画/音声書き出しに対応します。
+          Project Ugomemo は現在、初期テスト版です。確認済みの最新リリースは
+          <a href="https://github.com/Enomi-4mg/Project-Ugomemo/releases/tag/v0.1.5-test">v0.1.5-test</a>
+          で、GitHub Releases から試せます。
         </p>
         <p>
-          このGitHub Pagesページは <code>docs/</code> から配信できる静的ページです。
-          アプリ本体の白いグリッド、ピンクのコントロール、モノスペース文字、強い罫線のリズムに合わせています。
+          現在のリリースページには macOS Apple Silicon向け <code>.dmg</code> と、
+          Windows x64向け <code>.exe</code> / <code>.msi</code> インストーラーがあります。
+          Releases ページから環境に合うファイルを選んでください。
         </p>
       </div>
+    </section>
+
+    <section class="notes" aria-labelledby="concept-title">
+      <h2 id="concept-title">Concept</h2>
+      <div class="notes-body">
+        <p>
+          Project Ugomemo は、1枚描いて、次のフレームを作り、すぐ再生し、音声まで合わせるための小さなアニメーション制作環境です。
+        </p>
+        <p>
+          汎用的なプロ向け制作ソフトではなく、軽く、直接的に、短いフレームアニメーションを試作できるワークステーションを目指しています。
+        </p>
+      </div>
+    </section>
+
+    <section class="panel-section" aria-labelledby="features-title">
+      <div class="section-heading">
+        <h2 id="features-title">Features</h2>
+        <p>描く、動きを見る、音を合わせる、保存する、書き出す、という制作の流れに沿って機能を整理しています。</p>
+      </div>
+      <div class="feature-table" role="list">
+        <article role="listitem"><h3>Drawing</h3><p>Pen, Brush, Tone, Eraser, Shape</p></article>
+        <article role="listitem"><h3>Animation</h3><p>フレーム単位編集、ページ/フレーム列、オニオンスキン</p></article>
+        <article role="listitem"><h3>Layers</h3><p>A / B / C の3レイヤー</p></article>
+        <article role="listitem"><h3>Playback</h3><p>FPSセレクター、速度調整、プレビュー再生</p></article>
+        <article role="listitem"><h3>Audio</h3><p>音声素材追加、録音、4トラック配置、ミキサー、フレーム同期</p></article>
+        <article role="listitem"><h3>File</h3><p><code>.upj</code> プロジェクト保存/読込</p></article>
+        <article role="listitem"><h3>Export</h3><p>画像、動画、音声つき動画の書き出し</p></article>
+      </div>
+    </section>
+
+    <section class="panel-section" aria-labelledby="workflow-title">
+      <div class="section-heading">
+        <h2 id="workflow-title">Basic Workflow</h2>
+      </div>
+      <ol class="workflow-list">
+        <li>新規プロジェクトを作成する</li>
+        <li>Draw Mode でフレームを描く</li>
+        <li>Playback Mode で動きを確認する</li>
+        <li>Audio Mode で音声素材や録音を配置する</li>
+        <li>画像・動画・音声つき動画として書き出す</li>
+      </ol>
+    </section>
+
+    <section class="panel-section" aria-labelledby="samples-title">
+      <div class="section-heading">
+        <h2 id="samples-title">Samples</h2>
+        <p>現在は1つのサンプルを掲載中です。今後、追加の作例・書き出し例・サンプルプロジェクトを増やす予定です。</p>
+      </div>
+      <div class="sample-grid">
+        <article class="sample-card">
+          <video src="../assets/sample-animation.mp4" autoplay muted loop playsinline aria-label="Project Ugomemoで制作された掲載中のサンプルアニメーション"></video>
+          <div>
+            <h3>現在のサンプルアニメーション</h3>
+            <p>既存のサンプルを最初の1件として残し、今後の作例を追加しやすい構造にしています。</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel-section" aria-labelledby="tech-title">
+      <div class="section-heading">
+        <h2 id="tech-title">Tech Stack</h2>
+        <p>Tauri のデスクトップアプリとして、React UI と Rust 側のネイティブ処理を組み合わせています。</p>
+      </div>
+      <ul class="tag-list" aria-label="技術スタック">
+        <li>Tauri</li>
+        <li>React</li>
+        <li>TypeScript</li>
+        <li>Rust</li>
+        <li>Web Audio API</li>
+        <li>ffmpeg sidecar export flow</li>
+      </ul>
+    </section>
+
+    <section class="notes" aria-labelledby="project-file-title">
+      <h2 id="project-file-title">Project File</h2>
+      <div class="notes-body">
+        <p>
+          Project Ugomemo は <code>.upj</code> 形式でプロジェクトを保存します。
+          <code>.upj</code> には、フレーム画像、レイヤー情報、プロジェクト設定、Audio Mode のタイムライン状態が含まれます。
+        </p>
+        <p>
+          詳細な仕様や開発者向け情報は
+          <a href="https://github.com/Enomi-4mg/Project-Ugomemo#readme">README</a>
+          を参照してください。
+        </p>
+      </div>
+    </section>
+
+    <section class="two-column-sections" aria-label="Roadmap and limitations">
+      <section class="panel-section compact" aria-labelledby="roadmap-title">
+        <div class="section-heading">
+          <h2 id="roadmap-title">Roadmap</h2>
+        </div>
+        <ul class="plain-list">
+          <li>テストリリースの安定化</li>
+          <li>サンプルプロジェクトと作例の追加</li>
+          <li>Audio Mode の操作性改善</li>
+          <li>Brush / Tone ツールの改善</li>
+          <li>ドキュメント整備</li>
+        </ul>
+      </section>
+
+      <section class="panel-section compact" aria-labelledby="limitations-title">
+        <div class="section-heading">
+          <h2 id="limitations-title">Known Limitations</h2>
+        </div>
+        <ul class="plain-list">
+          <li>初期テスト版です</li>
+          <li>ファイル形式や互換性は今後変更される可能性があります</li>
+          <li>書き出しは ffmpeg sidecar flow に依存します</li>
+          <li>大きなプロジェクトではパフォーマンス調整が必要になる可能性があります</li>
+        </ul>
+      </section>
     </section>
   </main>
 </body>

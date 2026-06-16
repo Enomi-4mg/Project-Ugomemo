@@ -88,7 +88,8 @@ code {
 .hero-copy,
 .app-shot,
 .launch-item,
-.notes {
+.notes,
+.panel-section {
   border: var(--line) solid var(--pink);
   background: var(--white);
   box-shadow: var(--shadow);
@@ -104,9 +105,13 @@ code {
 
 .eyebrow,
 .summary,
+.hero-note,
 .shot-toolbar p,
 .launch-item p,
-.notes p {
+.notes p,
+.section-heading p,
+.feature-table p,
+.sample-card p {
   margin: 0;
 }
 
@@ -150,10 +155,25 @@ h2 {
   line-height: 1.45;
 }
 
+.hero-note {
+  max-width: 44rem;
+  border-left: 3px solid var(--pink);
+  padding-left: 12px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.hero-note strong {
+  color: var(--active-pink);
+}
+
 .primary-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 190px));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
+  max-width: 620px;
 }
 
 .primary-link,
@@ -167,6 +187,8 @@ h2 {
   color: var(--pink);
   font-size: 13px;
   font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
   text-decoration: none;
   text-transform: uppercase;
   transition:
@@ -286,7 +308,13 @@ h2 {
 }
 
 .launch-item p,
-.notes p {
+.notes p,
+.section-heading p,
+.feature-table p,
+.sample-card p,
+.workflow-list,
+.plain-list,
+.tag-list {
   color: var(--ink);
   font-size: 16px;
   font-weight: 700;
@@ -318,12 +346,128 @@ h2 {
   padding-left: 14px;
 }
 
+.panel-section {
+  display: grid;
+  gap: 18px;
+  margin-top: 16px;
+  padding: 18px;
+}
+
+.section-heading {
+  display: grid;
+  gap: 10px;
+  max-width: 900px;
+}
+
+.section-heading h2 {
+  width: fit-content;
+  border-bottom: 3px solid var(--pink);
+  padding-bottom: 10px;
+}
+
+.feature-table {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  border-top: 3px solid var(--pink);
+  border-left: 3px solid var(--pink);
+}
+
+.feature-table article {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 150px;
+  border-right: 3px solid var(--pink);
+  border-bottom: 3px solid var(--pink);
+  padding: 14px;
+}
+
+h3 {
+  margin: 0;
+  color: var(--active-pink);
+  font-size: 15px;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.workflow-list,
+.plain-list,
+.tag-list {
+  margin: 0;
+}
+
+.workflow-list {
+  display: grid;
+  gap: 10px;
+  padding-left: 24px;
+}
+
+.workflow-list li::marker {
+  color: var(--active-pink);
+  font-weight: 700;
+}
+
+.sample-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.sample-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  border: 3px solid var(--pink);
+  padding: 12px;
+}
+
+.sample-card video {
+  display: block;
+  width: 100%;
+  border: 3px solid var(--pink);
+  background: var(--white);
+}
+
+.sample-card div {
+  display: grid;
+  gap: 10px;
+}
+
+.tag-list,
+.plain-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 0;
+  list-style: none;
+}
+
+.tag-list li,
+.plain-list li {
+  border: 2px solid var(--pink);
+  background: var(--white);
+  padding: 9px 12px;
+}
+
+.two-column-sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.two-column-sections .panel-section {
+  margin-top: 16px;
+}
+
 @media (max-width: 980px) {
   .hero,
   .launch-grid,
-  .notes {
+  .notes,
+  .two-column-sections {
     grid-template-columns: 1fr;
   }
+
 }
 
 @media (max-width: 680px) {
@@ -354,12 +498,27 @@ h2 {
     grid-template-columns: 1fr;
   }
 
-  .notes {
+  .notes,
+  .panel-section {
     gap: 14px;
     padding: 14px;
   }
 
   .notes-body p {
     padding-left: 10px;
+  }
+
+  .feature-table,
+  .sample-card {
+    grid-template-columns: 1fr;
+  }
+
+  .feature-table article {
+    min-height: auto;
+  }
+
+  .tag-list,
+  .plain-list {
+    display: grid;
   }
 }

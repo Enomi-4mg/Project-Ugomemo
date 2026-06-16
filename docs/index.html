@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="A desktop app for pixel-style animation.">
+  <meta name="description" content="A desktop animation tool for making small, frame-based pixel animations with drawing, playback, and audio synchronization.">
   <meta property="og:title" content="Project Ugomemo">
-  <meta property="og:description" content="A desktop app for pixel-style animation.">
+  <meta property="og:description" content="A desktop animation tool for making small, frame-based pixel animations with drawing, playback, and audio synchronization.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://enomi-4mg.github.io/Project-Ugomemo/">
   <meta property="og:image" content="https://enomi-4mg.github.io/Project-Ugomemo/assets/og-image.png">
@@ -18,7 +18,7 @@
   <meta property="og:locale:alternate" content="ja_JP">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Project Ugomemo">
-  <meta name="twitter:description" content="A desktop app for pixel-style animation.">
+  <meta name="twitter:description" content="A desktop animation tool for making small, frame-based pixel animations with drawing, playback, and audio synchronization.">
   <meta name="twitter:image" content="https://enomi-4mg.github.io/Project-Ugomemo/assets/og-image.png">
   <meta name="twitter:image:alt" content="Project Ugomemo app icon">
   <title>Project Ugomemo</title>
@@ -41,11 +41,15 @@
         <p class="eyebrow">Pixel Animation Workstation</p>
         <h1>Project Ugomemo</h1>
         <p class="summary">
-          A pixel-style animation production app.
+          Project Ugomemo is a desktop animation tool for making small, frame-based pixel animations with drawing, playback, and audio synchronization in one workspace.
+        </p>
+        <p class="hero-note">
+          Current latest test release: <strong>v0.1.5-test</strong>. Available from GitHub Releases for macOS Apple Silicon DMG and Windows x64 EXE/MSI.
         </p>
         <nav class="primary-actions" aria-label="Primary links">
-          <a class="primary-link" href="https://github.com/enomi-4mg/Project-Ugomemo">GitHub</a>
-          <a class="secondary-link" href="https://github.com/enomi-4mg/Project-Ugomemo/releases">Releases</a>
+          <a class="primary-link" href="https://github.com/Enomi-4mg/Project-Ugomemo/releases">Download latest test build</a>
+          <a class="secondary-link" href="https://github.com/Enomi-4mg/Project-Ugomemo">GitHub</a>
+          <a class="secondary-link" href="https://github.com/Enomi-4mg/Project-Ugomemo#readme">README</a>
         </nav>
       </div>
 
@@ -72,18 +76,135 @@
       </article>
     </section>
 
-    <section class="notes" aria-label="Project notes">
-      <h2>Notes</h2>
+    <section class="notes" aria-labelledby="status-title">
+      <h2 id="status-title">Current Status</h2>
       <div class="notes-body">
         <p>
-          Desktop app project files use <code>.upj</code>. The app supports native save/load dialogs,
-          bundled audio assets, image export, and video/audio export through the Tauri sidecar flow.
+          Project Ugomemo is currently an early test build. The latest confirmed release is
+          <a href="https://github.com/Enomi-4mg/Project-Ugomemo/releases/tag/v0.1.5-test">v0.1.5-test</a>,
+          published on GitHub Releases.
         </p>
         <p>
-          This GitHub Pages site is static and can be served from <code>docs/</code>.
-          It mirrors the app's white grid, pink controls, mono type, and high-contrast panel rhythm.
+          The current release page provides a macOS Apple Silicon <code>.dmg</code> build and
+          Windows x64 <code>.exe</code> / <code>.msi</code> installers. Use the Releases page as
+          the download entry point so you can choose the matching asset.
         </p>
       </div>
+    </section>
+
+    <section class="notes" aria-labelledby="concept-title">
+      <h2 id="concept-title">Concept</h2>
+      <div class="notes-body">
+        <p>
+          Project Ugomemo is designed as a small animation workspace where you can draw a frame,
+          add the next one, play it back, and attach sound without leaving the app.
+        </p>
+        <p>
+          The goal is not to build a general-purpose professional animation suite, but to create a
+          lightweight tool for fast frame animation experiments.
+        </p>
+      </div>
+    </section>
+
+    <section class="panel-section" aria-labelledby="features-title">
+      <div class="section-heading">
+        <h2 id="features-title">Features</h2>
+        <p>Core tools are grouped by the way you work: draw frames, check motion, sync sound, save projects, and export results.</p>
+      </div>
+      <div class="feature-table" role="list">
+        <article role="listitem"><h3>Drawing</h3><p>Pen, Brush, Tone, Eraser, Shape</p></article>
+        <article role="listitem"><h3>Animation</h3><p>Frame-based editing, page/frame rail, onion skin</p></article>
+        <article role="listitem"><h3>Layers</h3><p>Three drawing layers: A / B / C</p></article>
+        <article role="listitem"><h3>Playback</h3><p>FPS selector, speed control, preview playback</p></article>
+        <article role="listitem"><h3>Audio</h3><p>Add audio materials, record, arrange four tracks, mix levels, and sync to frames</p></article>
+        <article role="listitem"><h3>File</h3><p><code>.upj</code> project save/load</p></article>
+        <article role="listitem"><h3>Export</h3><p>Image export, video export, and audio/video export</p></article>
+      </div>
+    </section>
+
+    <section class="panel-section" aria-labelledby="workflow-title">
+      <div class="section-heading">
+        <h2 id="workflow-title">Basic Workflow</h2>
+      </div>
+      <ol class="workflow-list">
+        <li>Create a new project</li>
+        <li>Draw frames in Draw Mode</li>
+        <li>Check motion in Playback Mode</li>
+        <li>Add or record audio in Audio Mode</li>
+        <li>Export as image, video, or audio/video</li>
+      </ol>
+    </section>
+
+    <section class="panel-section" aria-labelledby="samples-title">
+      <div class="section-heading">
+        <h2 id="samples-title">Samples</h2>
+        <p>One sample is currently published. More works, export examples, and sample projects are planned as the app develops.</p>
+      </div>
+      <div class="sample-grid">
+        <article class="sample-card">
+          <video src="./assets/sample-animation.mp4" autoplay muted loop playsinline aria-label="Published sample animation made with Project Ugomemo"></video>
+          <div>
+            <h3>Current sample animation</h3>
+            <p>The existing sample remains here as the first item in a structure ready for more examples.</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel-section" aria-labelledby="tech-title">
+      <div class="section-heading">
+        <h2 id="tech-title">Tech Stack</h2>
+        <p>A Tauri desktop app with a React UI and Rust-backed native commands.</p>
+      </div>
+      <ul class="tag-list" aria-label="Technology stack">
+        <li>Tauri</li>
+        <li>React</li>
+        <li>TypeScript</li>
+        <li>Rust</li>
+        <li>Web Audio API</li>
+        <li>ffmpeg sidecar export flow</li>
+      </ul>
+    </section>
+
+    <section class="notes" aria-labelledby="project-file-title">
+      <h2 id="project-file-title">Project File</h2>
+      <div class="notes-body">
+        <p>
+          Project Ugomemo uses <code>.upj</code>, a portable project package that stores frame images,
+          layer data, project metadata, and Audio Mode timeline state.
+        </p>
+        <p>
+          For detailed behavior, implementation notes, and developer-facing information, see the
+          <a href="https://github.com/Enomi-4mg/Project-Ugomemo#readme">README</a>.
+        </p>
+      </div>
+    </section>
+
+    <section class="two-column-sections" aria-label="Roadmap and limitations">
+      <section class="panel-section compact" aria-labelledby="roadmap-title">
+        <div class="section-heading">
+          <h2 id="roadmap-title">Roadmap</h2>
+        </div>
+        <ul class="plain-list">
+          <li>Stabilize test releases</li>
+          <li>Add sample projects and more examples</li>
+          <li>Improve Audio Mode usability</li>
+          <li>Improve Brush and Tone tools</li>
+          <li>Expand documentation</li>
+        </ul>
+      </section>
+
+      <section class="panel-section compact" aria-labelledby="limitations-title">
+        <div class="section-heading">
+          <h2 id="limitations-title">Known Limitations</h2>
+        </div>
+        <ul class="plain-list">
+          <li>This is an early test build</li>
+          <li>File format and compatibility may change</li>
+          <li>Export depends on the ffmpeg sidecar flow</li>
+          <li>Large projects may still need performance tuning</li>
+        </ul>
+      </section>
     </section>
   </main>
 </body>
