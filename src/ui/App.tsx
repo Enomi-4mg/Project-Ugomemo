@@ -284,6 +284,7 @@ export function App() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioBufferCacheRef = useRef<Map<string, AudioBuffer>>(new Map());
   const scheduledAudioRef = useRef<AudioScheduledSourceNode[]>([]);
+  const audioScheduleGenerationRef = useRef(0);
   const playbackStartedAtRef = useRef(0);
   const playbackFrameAtStartRef = useRef(0);
   const recordCountdownTimeoutRef = useRef<number | null>(null);
@@ -826,6 +827,9 @@ export function App() {
     };
 
     const onMouseUp = () => {
+      if (clipDragRef.current) {
+        setHasUnsavedChanges(true);
+      }
       clipDragRef.current = null;
     };
 
@@ -1550,7 +1554,7 @@ export function App() {
         ),
       ),
     );
-    setHistory((currentHistory) => remapHistoryLayerColor(currentHistory, project.currentPageIndex, layerIndex, oldColor, newColor));
+    setHistory((currentHistory) => remapHistoryLayerColor(currentHistory, project.frames[project.currentPageIndex]?.id, layerId, oldColor, newColor));
     setHasUnsavedChanges(true);
     setColorPopover(null);
   }
@@ -2008,26 +2012,36 @@ export function App() {
 
   async function scheduleTimelineAudio(startFrame: number) {
     stopScheduledTimelineAudio();
+    const generation = audioScheduleGenerationRef.current;
     const context = await getAudioContext();
+    if (generation !== audioScheduleGenerationRef.current) {
+      return;
+    }
     const now = context.currentTime + 0.03;
     const startSeconds = startFrame / playbackFps;
 
     for (const clip of timelineClips) {
       const clipStartSeconds = clip.startFrame / playbackFps;
-      const clipDurationSeconds = (clip.durationFrames * clip.loopCount) / playbackFps;
+      const clipLengthSeconds = clip.durationFrames / playbackFps;
+      const clipDurationSeconds = clipLengthSeconds * clip.loopCount;
       const clipEndSeconds = clipStartSeconds + clipDurationSeconds;
       if (clipEndSeconds <= startSeconds) {
         continue;
       }
 
       const buffer = await loadAudioBufferForClip(clip, context);
+      if (generation !== audioScheduleGenerationRef.current) {
+        return;
+      }
       if (!buffer) {
         continue;
       }
 
       const sourceOffset = Math.max(0, startSeconds - clipStartSeconds);
+      const offsetIntoLoop = clipLengthSeconds > 0 ? sourceOffset % clipLengthSeconds : 0;
       const startDelay = Math.max(0, clipStartSeconds - startSeconds);
       const playDuration = Math.max(0, clipDurationSeconds - sourceOffset);
+      const region = getClipBufferRegion(clip, buffer, playbackFps);
       const source = context.createBufferSource();
       const gain = context.createGain();
       const trackGain = context.createGain();
@@ -2035,19 +2049,20 @@ export function App() {
       const track = audioTracks[clip.trackIndex] ?? createDefaultAudioTracks()[clip.trackIndex];
       source.buffer = buffer;
       source.loop = clip.loopCount > 1;
-      source.loopStart = clip.sourceOffsetFrames / playbackFps;
-      source.loopEnd = Math.min(buffer.duration, (clip.sourceOffsetFrames + clip.durationFrames) / playbackFps);
+      source.loopStart = region.loopStart;
+      source.loopEnd = region.loopEnd;
       gain.gain.value = clip.volume;
       trackGain.gain.value = getEffectiveTrackGain(track, audioTracks);
       panner.pan.value = clip.panning;
       applyClipFades(gain.gain, clip, now + startDelay, playDuration, playbackFps);
       source.connect(gain).connect(panner).connect(trackGain).connect(context.destination);
-      source.start(now + startDelay, clip.sourceOffsetFrames / playbackFps + sourceOffset, playDuration);
+      source.start(now + startDelay, region.offsetSeconds + offsetIntoLoop, playDuration);
       scheduledAudioRef.current.push(source);
     }
   }
 
   function stopScheduledTimelineAudio() {
+    audioScheduleGenerationRef.current += 1;
     for (const node of scheduledAudioRef.current) {
       try {
         if ("stop" in node) {
@@ -2080,10 +2095,11 @@ export function App() {
       const trackGain = context.createGain();
       const panner = context.createStereoPanner();
       const track = audioTracks[clip.trackIndex] ?? createDefaultAudioTracks()[clip.trackIndex];
+      const region = getClipBufferRegion(clip, buffer, playbackFps);
       source.buffer = buffer;
       source.loop = clip.loopCount > 1;
-      source.loopStart = clip.sourceOffsetFrames / playbackFps;
-      source.loopEnd = Math.min(buffer.duration, (clip.sourceOffsetFrames + clip.durationFrames) / playbackFps);
+      source.loopStart = region.loopStart;
+      source.loopEnd = region.loopEnd;
       gain.gain.value = clip.volume;
       trackGain.gain.value = getEffectiveTrackGain(track, audioTracks);
       panner.pan.value = clip.panning;
@@ -2091,7 +2107,7 @@ export function App() {
       const duration = (clip.durationFrames * clip.loopCount) / playbackFps;
       applyClipFades(gain.gain, clip, startAt, duration, playbackFps);
       source.connect(gain).connect(panner).connect(trackGain).connect(context.destination);
-      source.start(startAt, clip.sourceOffsetFrames / playbackFps, duration);
+      source.start(startAt, region.offsetSeconds, duration);
     }
 
     const rendered = await context.startRendering();
@@ -2115,6 +2131,11 @@ export function App() {
       ...current,
       ...Object.fromEntries(files.map((file) => [file.id, audioFileToAsset(file)])),
     }));
+    const failedProbes = files.filter((file) => file.durationError);
+    if (failedProbes.length > 0) {
+      setStatus(`${files.length} added, but duration probe failed for ${failedProbes.map((file) => file.name).join(", ")}.`);
+      return;
+    }
     setStatus(`${files.length} audio material${files.length === 1 ? "" : "s"} added.`);
   }
 
@@ -2925,6 +2946,7 @@ export function App() {
       startFrame: playbackIndex,
     };
     setTimelineClips((current) => [...current, clip]);
+    setHasUnsavedChanges(true);
     setSelectedClipId(clip.id);
   }
 
@@ -2934,6 +2956,7 @@ export function App() {
     }
 
     setTimelineClips((current) => current.filter((clip) => clip.id !== selectedClipId));
+    setHasUnsavedChanges(true);
     setSelectedClipId(null);
     setClipContextMenu(null);
   }
@@ -2946,6 +2969,7 @@ export function App() {
 
     const duplicate = { ...clip, id: `clip-${Date.now()}`, startFrame: Math.min(project.frames.length - 1, clip.startFrame + 1) };
     setTimelineClips((current) => [...current, duplicate]);
+    setHasUnsavedChanges(true);
     setSelectedClipId(duplicate.id);
   }
 
@@ -2967,6 +2991,7 @@ export function App() {
     setTimelineClips((current) =>
       current.map((candidate) => (candidate.id === clip.id ? { ...candidate, durationFrames: firstDuration } : candidate)).concat(secondClip),
     );
+    setHasUnsavedChanges(true);
     setSelectedClipId(secondClip.id);
   }
 
@@ -2974,6 +2999,7 @@ export function App() {
     setTimelineClips((current) =>
       current.map((clip) => (clip.id === selectedClipId ? { ...clip, reversed: !clip.reversed } : clip)),
     );
+    setHasUnsavedChanges(true);
   }
 
   function renderLayerColorControl(layer: Layer, slot: 0 | 1) {
@@ -4987,6 +5013,25 @@ function summarizePcmBytes(bytes: Uint8Array, bucketCount = 160): number[] {
   return summary;
 }
 
+function getClipBufferRegion(clip: TimelineClip, buffer: AudioBuffer, fps: number): {
+  offsetSeconds: number;
+  loopStart: number;
+  loopEnd: number;
+} {
+  const clipLengthSeconds = clip.durationFrames / fps;
+  const forwardOffsetSeconds = clip.sourceOffsetFrames / fps;
+  // reverseAudioBuffer flips the whole file, so a reversed clip must mirror
+  // its offset to keep playing the same source segment (backwards).
+  const offsetSeconds = clip.reversed
+    ? Math.max(0, buffer.duration - (forwardOffsetSeconds + clipLengthSeconds))
+    : forwardOffsetSeconds;
+  return {
+    offsetSeconds,
+    loopStart: offsetSeconds,
+    loopEnd: Math.min(buffer.duration, offsetSeconds + clipLengthSeconds),
+  };
+}
+
 function reverseAudioBuffer(buffer: AudioBuffer, context: BaseAudioContext): AudioBuffer {
   const reversed = context.createBuffer(buffer.numberOfChannels, buffer.length, buffer.sampleRate);
   for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
@@ -5121,23 +5166,25 @@ function remapLayerColor(
 
 function remapHistoryLayerColor(
   history: HistoryState,
-  frameIndex: number,
-  layerIndex: number,
+  frameId: string | undefined,
+  layerId: string,
   oldColor: PaletteColor["rgba"],
   newColor: PaletteColor["rgba"],
 ): HistoryState {
-  if (frameIndex < 0 || layerIndex < 0 || sameColor(oldColor, newColor)) {
+  if (!frameId || sameColor(oldColor, newColor)) {
     return history;
   }
 
+  // Snapshots may order frames differently from the live project (frames get
+  // added, removed, or reordered), so the target is matched by id.
   const remapSnapshot = (snapshot: HistoryState["undoStack"][number]) => ({
     ...snapshot,
-    frames: snapshot.frames.map((frame, currentFrameIndex) =>
-      currentFrameIndex === frameIndex
+    frames: snapshot.frames.map((frame) =>
+      frame.id === frameId
         ? {
             ...frame,
-            layers: frame.layers.map((layer, currentLayerIndex) =>
-              currentLayerIndex === layerIndex
+            layers: frame.layers.map((layer) =>
+              layer.id === layerId
                 ? { ...layer, imageData: remapLayerColor(layer.imageData, oldColor, newColor) }
                 : layer,
             ),

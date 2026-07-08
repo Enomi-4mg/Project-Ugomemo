@@ -134,7 +134,6 @@ export async function encodeActiveLayer(project: DrawingProject): Promise<number
   return invoke<number[]>("encode_layer_png", {
     width: project.width,
     height: project.height,
-    fps: project.fps,
     pixels: Array.from(layer.imageData.data),
   });
 }
@@ -237,6 +236,7 @@ export type AudioFilePath = {
   path: string;
   extension: string;
   durationMs?: number;
+  durationError?: string;
   waveformSummary?: number[];
   isOffline?: boolean;
 };

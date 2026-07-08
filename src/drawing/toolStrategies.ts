@@ -6,7 +6,7 @@ import type { BrushRotationMode, BrushSmoothingMode } from "./brush/types";
 import type { BrushTipId } from "./brush/tips";
 import { getStrokeShapeDefinition, type StampMask, type StrokeShapeId } from "./strokeShapes";
 import type { Camera, DrawingProject, Layer, PaletteColor, Tool } from "./types";
-import { parseTonePattern, type TonePattern } from "../ui/tone/tonePattern";
+import { parseTonePattern, type TonePattern, type TonePatternSize } from "../ui/tone/tonePattern";
 
 export type DrawingToolId = Tool;
 export type PenShape = StrokeShapeId;
@@ -647,40 +647,71 @@ function createTonePattern(
   context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   settings: ToolSettings,
 ): CanvasPattern | null {
+  const tile = renderTonePatternTile(settings);
+  if (!tile) {
+    return null;
+  }
+
+  return context.createPattern(tile as unknown as CanvasImageSource, "repeat");
+}
+
+function getToneDotGeometry(patternSize: TonePatternSize, density: number): { spacing: number; radius: number } {
+  return {
+    spacing: Math.max(3, Math.round((patternSize === "large" ? 18 : patternSize === "medium" ? 12 : 8) - density * 5)),
+    radius: Math.max(1, Math.round((patternSize === "large" ? 5 : patternSize === "medium" ? 3 : 2) + density)),
+  };
+}
+
+function getToneLineGeometry(patternSize: TonePatternSize, density: number): { spacing: number; lineWidth: number } {
+  return {
+    spacing: Math.max(3, Math.round((patternSize === "large" ? 20 : patternSize === "medium" ? 14 : 9) - density * 6)),
+    lineWidth: Math.max(1, Math.round((patternSize === "large" ? 3 : patternSize === "medium" ? 2 : 1) + density)),
+  };
+}
+
+// Single source of truth for tone pattern pixels: both the fill pattern and
+// the brush alpha sampler read this tile, so they can never drift apart.
+function renderTonePatternTile(settings: ToolSettings): PatternCanvas | null {
   const { base, size: patternSize } = parseTonePattern(settings.tonePattern);
   const density = getToneDensityFactor(settings.toneDensity);
   const cellSize = patternSize === "large" ? 72 : patternSize === "medium" ? 48 : 28;
-  const patternCanvas = createPatternCanvas(cellSize, cellSize);
+  const spacing = base === "dot"
+    ? getToneDotGeometry(patternSize, density).spacing
+    : base === "line"
+      ? getToneLineGeometry(patternSize, density).spacing
+      : cellSize;
+  // Round the tile to a whole number of periods so it repeats seamlessly.
+  const tileSize = base === "noise" ? cellSize : spacing * Math.max(1, Math.round(cellSize / spacing));
+  const patternCanvas = createPatternCanvas(tileSize, tileSize);
   const patternContext = patternCanvas.getContext("2d");
 
   if (!patternContext) {
     return null;
   }
 
-  patternContext.clearRect(0, 0, cellSize, cellSize);
+  patternContext.clearRect(0, 0, tileSize, tileSize);
   patternContext.fillStyle = rgbaToCss(settings.color);
   patternContext.strokeStyle = rgbaToCss(settings.color);
-  patternContext.lineWidth = Math.max(1, Math.round(1 + density * (patternSize === "large" ? 2 : patternSize === "medium" ? 1.5 : 1)));
 
   if (base === "dot") {
-    const spacing = Math.max(3, Math.round((patternSize === "large" ? 18 : patternSize === "medium" ? 12 : 8) - density * 5));
-    const radius = Math.max(1, Math.round((patternSize === "large" ? 5 : patternSize === "medium" ? 3 : 2) + density));
+    const { radius } = getToneDotGeometry(patternSize, density);
 
-    for (let y = radius; y < cellSize; y += spacing) {
-      for (let x = radius; x < cellSize; x += spacing) {
+    // Draw one ring past the tile so dots wider than a cell bleed across the seam.
+    for (let y = spacing / 2 - spacing; y < tileSize + spacing; y += spacing) {
+      for (let x = spacing / 2 - spacing; x < tileSize + spacing; x += spacing) {
         patternContext.beginPath();
         patternContext.arc(x, y, radius, 0, Math.PI * 2);
         patternContext.fill();
       }
     }
   } else if (base === "line") {
-    const spacing = Math.max(3, Math.round((patternSize === "large" ? 20 : patternSize === "medium" ? 14 : 9) - density * 6));
-    patternContext.lineWidth = Math.max(1, Math.round((patternSize === "large" ? 3 : patternSize === "medium" ? 2 : 1) + density));
+    const { lineWidth } = getToneLineGeometry(patternSize, density);
+    patternContext.lineWidth = lineWidth;
 
-    for (let x = -cellSize; x < cellSize * 2; x += spacing) {
+    for (let x = -tileSize; x < tileSize * 2; x += spacing) {
       patternContext.beginPath();
-      patternContext.moveTo(x, 0);
-      patternContext.lineTo(x + cellSize, cellSize);
+      patternContext.moveTo(x - spacing, -spacing);
+      patternContext.lineTo(x + tileSize + spacing, tileSize + spacing);
       patternContext.stroke();
     }
   } else {
@@ -688,8 +719,8 @@ function createTonePattern(
     const probability = Math.min(0.35, 0.1 + density * 0.22);
     const noiseSize = patternSize === "large" ? 3 : patternSize === "medium" ? 2 : 1;
 
-    for (let y = 0; y < cellSize; y += 1) {
-      for (let x = 0; x < cellSize; x += 1) {
+    for (let y = 0; y < tileSize; y += 1) {
+      for (let x = 0; x < tileSize; x += 1) {
         if (random() > probability) {
           continue;
         }
@@ -699,50 +730,28 @@ function createTonePattern(
     }
   }
 
-  return context.createPattern(patternCanvas as unknown as CanvasImageSource, "repeat");
+  return patternCanvas;
 }
 
 function createTonePatternAlphaSampler(settings: ToolSettings): (projectX: number, projectY: number) => number {
-  const { base, size: patternSize } = parseTonePattern(settings.tonePattern);
-  const density = getToneDensityFactor(settings.toneDensity);
-
-  if (base === "dot") {
-    const spacing = Math.max(3, Math.round((patternSize === "large" ? 18 : patternSize === "medium" ? 12 : 8) - density * 5));
-    const radius = Math.max(1, (patternSize === "large" ? 5 : patternSize === "medium" ? 3 : 2) + density);
-    return (projectX, projectY) => {
-      const localX = positiveModulo(projectX, spacing);
-      const localY = positiveModulo(projectY, spacing);
-      const dx = localX - spacing / 2;
-      const dy = localY - spacing / 2;
-      const edge = radius - Math.sqrt(dx * dx + dy * dy);
-      if (!(settings.antialias ?? false)) {
-        return edge >= 0 ? 1 : 0;
-      }
-      return Math.max(0, Math.min(1, edge + 0.5));
-    };
+  const tile = renderTonePatternTile(settings);
+  const tileContext = tile?.getContext("2d");
+  if (!tile || !tileContext) {
+    return () => 1;
   }
 
-  if (base === "line") {
-    const spacing = Math.max(3, Math.round((patternSize === "large" ? 20 : patternSize === "medium" ? 14 : 9) - density * 6));
-    const lineWidth = Math.max(1, (patternSize === "large" ? 3 : patternSize === "medium" ? 2 : 1) + density);
-    return (projectX, projectY) => {
-      const diagonalPosition = positiveModulo(projectX - projectY, spacing);
-      const distance = Math.min(diagonalPosition, spacing - diagonalPosition);
-      const edge = lineWidth / 2 - distance;
-      if (!(settings.antialias ?? false)) {
-        return edge >= 0 ? 1 : 0;
-      }
-      return Math.max(0, Math.min(1, edge + 0.5));
-    };
-  }
-
-  const probability = Math.min(0.35, 0.1 + density * 0.22);
-  const noiseSize = patternSize === "large" ? 3 : patternSize === "medium" ? 2 : 1;
-  const seed = settings.toneDensity * 97 + (patternSize === "large" ? 37 : patternSize === "medium" ? 23 : 11);
+  const width = tile.width;
+  const height = tile.height;
+  const alphaData = tileContext.getImageData(0, 0, width, height).data;
+  const antialias = settings.antialias ?? false;
   return (projectX, projectY) => {
-    const cellX = Math.floor(projectX / noiseSize);
-    const cellY = Math.floor(projectY / noiseSize);
-    return hashGridNoise(cellX, cellY, seed) <= probability ? 1 : 0;
+    const x = positiveModulo(Math.floor(projectX), width);
+    const y = positiveModulo(Math.floor(projectY), height);
+    const alpha = alphaData[(y * width + x) * 4 + 3] / 255;
+    if (!antialias) {
+      return alpha >= 0.5 ? 1 : 0;
+    }
+    return alpha;
   };
 }
 
@@ -752,12 +761,6 @@ function getToneDensityFactor(density: number): number {
 
 function positiveModulo(value: number, divisor: number): number {
   return ((value % divisor) + divisor) % divisor;
-}
-
-function hashGridNoise(x: number, y: number, seed: number): number {
-  let hash = (seed ^ Math.imul(x, 374761393) ^ Math.imul(y, 668265263)) >>> 0;
-  hash = Math.imul(hash ^ (hash >>> 13), 1274126177) >>> 0;
-  return ((hash ^ (hash >>> 16)) >>> 0) / 0xffffffff;
 }
 
 function strokePath(
@@ -1034,6 +1037,11 @@ function drawPixelShape(context: CanvasRenderingContext2D, start: Point, end: Po
       const triangle = getTrianglePoints(start, end, crossPoint, settings.shapeOptionSnap ?? false);
       if (fillShape) {
         fillPixelTriangle(context, triangle.apex, triangle.baseRight, triangle.baseLeft);
+        // The scanline fill excludes the max-Y row (half-open rule), so trace
+        // the edges to complete the shape.
+        drawPixelLine(context, triangle.apex, triangle.baseRight, 1);
+        drawPixelLine(context, triangle.baseRight, triangle.baseLeft, 1);
+        drawPixelLine(context, triangle.baseLeft, triangle.apex, 1);
       } else {
         drawPixelLine(context, triangle.apex, triangle.baseRight, settings.size);
         drawPixelLine(context, triangle.baseRight, triangle.baseLeft, settings.size);
@@ -1046,6 +1054,12 @@ function drawPixelShape(context: CanvasRenderingContext2D, start: Point, end: Po
       if (fillShape) {
         fillPixelTriangle(context, rectangle.topLeft, rectangle.topRight, rectangle.bottomRight);
         fillPixelTriangle(context, rectangle.bottomRight, rectangle.bottomLeft, rectangle.topLeft);
+        // The scanline fill excludes the max-Y row (half-open rule), so trace
+        // the outline to complete the shape.
+        drawPixelLine(context, rectangle.topLeft, rectangle.topRight, 1);
+        drawPixelLine(context, rectangle.topRight, rectangle.bottomRight, 1);
+        drawPixelLine(context, rectangle.bottomRight, rectangle.bottomLeft, 1);
+        drawPixelLine(context, rectangle.bottomLeft, rectangle.topLeft, 1);
         break;
       }
       drawPixelLine(context, rectangle.topLeft, rectangle.topRight, settings.size);
