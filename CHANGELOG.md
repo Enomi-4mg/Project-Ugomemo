@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-07-08
+
+### Fixed
+
+- Reversed timeline clips now play the same source segment backwards; trimmed or split clips previously played a different part of the audio when reversed.
+- Deleting, duplicating, splitting, reversing, pasting, and drag-trimming timeline clips now mark the project as having unsaved changes, so the close warning fires.
+- Filled triangles and rectangles no longer miss their bottom pixel row.
+- Timeline audio is no longer double-scheduled when playback starts at frame 0.
+- Resuming playback partway through a looped clip now starts from the correct position inside the loop.
+- Tone fills and tone brush strokes now render from the same pattern tile, so dot/line/noise tones align and match in size.
+- Changing a layer color after adding, removing, or reordering frames no longer remaps the wrong frame or layer in undo history.
+- Audio duration probe failures are reported on import instead of silently becoming 0 ms.
+- Loading a `.upj` now caps zip entry sizes and validates PNG dimensions before decoding, guarding against corrupt or malicious archives.
+
+### Verified
+
+- Ran `npm run build` and `cargo check --manifest-path src-tauri/Cargo.toml` successfully.
+
 ## 2026-06-16
 
 ### Changed

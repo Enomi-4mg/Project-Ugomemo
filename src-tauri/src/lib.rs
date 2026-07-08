@@ -74,6 +74,8 @@ pub struct AudioFilePayload {
     extension: String,
     #[serde(default)]
     duration_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    duration_error: Option<String>,
     #[serde(default)]
     waveform_summary: Vec<f32>,
     #[serde(default)]
@@ -656,6 +658,11 @@ fn inspect_audio_files(paths: Vec<String>) -> Result<Vec<AudioFilePayload>, Stri
                 .unwrap_or(file_name)
                 .to_string();
 
+            let (duration_ms, duration_error) = match probe_audio_duration_ms(path) {
+                Ok(value) => (value, None),
+                Err(error) => (0, Some(error)),
+            };
+
             Ok(AudioFilePayload {
                 id: format!(
                     "{}-{}",
@@ -668,7 +675,8 @@ fn inspect_audio_files(paths: Vec<String>) -> Result<Vec<AudioFilePayload>, Stri
                 name,
                 path: path.to_string(),
                 extension,
-                duration_ms: probe_audio_duration_ms(path).unwrap_or(0),
+                duration_ms,
+                duration_error,
                 waveform_summary: summarize_audio_file_bytes(&path_buf).unwrap_or_default(),
                 is_offline: !path_buf.exists(),
             })
@@ -1483,33 +1491,50 @@ fn encode_png(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, String>
 }
 
 fn decode_png_rgba(width: u32, height: u32, bytes: &[u8]) -> Result<Vec<u8>, String> {
-    let image = image::load_from_memory(bytes).map_err(|error| error.to_string())?;
-    if image.width() != width || image.height() != height {
+    // Check the header dimensions before decoding so a decompression-bomb PNG
+    // cannot allocate an arbitrarily large image.
+    let (decoded_width, decoded_height) = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|error| error.to_string())?
+        .into_dimensions()
+        .map_err(|error| error.to_string())?;
+    if decoded_width != width || decoded_height != height {
         return Err(format!(
-            "Layer PNG dimensions are {}x{}, expected {}x{}.",
-            image.width(),
-            image.height(),
-            width,
-            height
+            "Layer PNG dimensions are {decoded_width}x{decoded_height}, expected {width}x{height}."
         ));
     }
 
+    let image = image::load_from_memory(bytes).map_err(|error| error.to_string())?;
     Ok(image.to_rgba8().into_raw())
 }
 
+// Caps how much a single .upj zip entry may inflate to, so a malicious
+// archive cannot exhaust memory. The declared entry size can lie, so the
+// actual read is capped as well.
+const MAX_ZIP_ENTRY_BYTES: u64 = 256 * 1024 * 1024;
+
 fn read_zip_text(archive: &mut ZipArchive<File>, path: &str) -> Result<String, String> {
-    let mut file = archive.by_name(path).map_err(|error| error.to_string())?;
-    let mut text = String::new();
-    file.read_to_string(&mut text)
-        .map_err(|error| error.to_string())?;
-    Ok(text)
+    let bytes = read_zip_bytes(archive, path)?;
+    String::from_utf8(bytes).map_err(|error| error.to_string())
 }
 
 fn read_zip_bytes(archive: &mut ZipArchive<File>, path: &str) -> Result<Vec<u8>, String> {
-    let mut file = archive.by_name(path).map_err(|error| error.to_string())?;
+    let file = archive.by_name(path).map_err(|error| error.to_string())?;
+    if file.size() > MAX_ZIP_ENTRY_BYTES {
+        return Err(format!(
+            "Zip entry \"{path}\" is too large ({} bytes).",
+            file.size()
+        ));
+    }
+
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
+    file.take(MAX_ZIP_ENTRY_BYTES + 1)
+        .read_to_end(&mut bytes)
         .map_err(|error| error.to_string())?;
+    if bytes.len() as u64 > MAX_ZIP_ENTRY_BYTES {
+        return Err(format!("Zip entry \"{path}\" is too large."));
+    }
+
     Ok(bytes)
 }
 
